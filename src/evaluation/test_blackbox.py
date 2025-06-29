@@ -58,28 +58,30 @@ class BlackBoxTester:
                     }
     
     def load_test_data(self, dataset_name, split='test'):
-        """Load test data"""
-        # Use sample data for testing
-        if dataset_name == 'sst2':
-            sample_sentences = [
-                "This movie is absolutely fantastic!",
-                "I really enjoyed watching this film.",
-                "The acting was superb and the plot was engaging.",
-                "This is one of the best movies I've ever seen.",
-                "The cinematography was beautiful and the story was compelling."
-            ]
-        elif dataset_name == 'personachat':
-            sample_sentences = [
-                "Hello, how are you today?",
-                "What's your favorite hobby?",
-                "Do you like traveling?",
-                "What's your favorite food?",
-                "How was your weekend?"
-            ]
-        else:
-            raise ValueError(f"Unsupported dataset: {dataset_name}")
-        
-        return sample_sentences[:5]  # Use 5 sentences for testing
+        """Load test data using GEIA"""
+        try:
+            # Import GEIA data processing
+            sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'GEIA'))
+            from data_process import get_sent_list
+            
+            config = {
+                'dataset': dataset_name,
+                'data_type': split
+            }
+            
+            sentences = get_sent_list(config)
+            
+            # Use reasonable test size
+            if len(sentences) > 100:
+                sentences = sentences[:100]
+            
+            print(f"Loaded {len(sentences)} test sentences from {dataset_name}")
+            return sentences
+            
+        except Exception as e:
+            print(f"Error loading test data: {e}")
+            # Return minimal fallback for testing
+            return ["This is a test sentence."]
     
     def get_blackbox_embeddings(self, sentences):
         """Get embeddings from black-box model"""

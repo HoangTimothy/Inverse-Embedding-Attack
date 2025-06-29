@@ -1,218 +1,279 @@
+#!/usr/bin/env python3
+"""
+GEIA-based evaluation framework for inverse embedding attack
+Uses GEIA's evaluation metrics and methods
+"""
+
 import os
-#os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-import time
-import numpy as np
-import pandas as pd
-import tqdm
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import DataLoader
-from torch.nn.utils.rnn import pad_sequence
-from transformers import AutoModelForCausalLM,AutoTokenizer
-from torch.optim import AdamW
 import sys
-import argparse
-import attacker_models
-from attacker_models import read_pt, Dataset,Dataset_trans,SequenceCrossEntropyLoss
-#from sentence_revocer_transformer import train_on_batch
 import json
-from decode_beam_search import beam_decode_sentence
-import decode_beam_search_opt
-#from bookcorpus_train import str2bool,BookCorpus_Dataset
-def get_dataloader(config):
-    data_type= config['data_type']
-    batch_size = config['batch_size']
-    if config['use_trans']:
-        if config['p_simcse_flag']:
-            ### path to pt checkpoint
-            data = torch.load('/data/hlibt/gradient_leakage/pytorch/data/personachat_processed/hidden_test_sbert.pt')
-            dataset = BookCorpus_Dataset(data)
-        else:
-            X,Y,A,D = read_pt(data_type,use_trans=config['use_trans'])
-            dataset = Dataset_trans(X,Y,A,D)
-    else:
-        X,Y,A = read_pt(data_type,use_trans=config['use_trans'])
-        dataset = Dataset(X,Y,A)
-    dataloader = DataLoader(dataset=dataset, 
-                              shuffle=True, 
-                              batch_size=batch_size)
-    return dataloader
+import torch
+import numpy as np
+from tqdm import tqdm
+from sentence_transformers import SentenceTransformer, util
 
-def get_model(config):
+# Add GEIA to path
+sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'GEIA'))
+from eval_generation import eval_on_batch
+from eval_classification import eval_classification
+from eval_ppl import eval_ppl
 
-    model_dir = config['model_dir']
-    model_type = config['model_type']
+# Add local path
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+from config import ATTACKER_MODELS, EMBEDDING_MODELS, PATHS, EVAL_CONFIG
 
-    if model_type == '1layerNN':
-        model = attacker_models.model_inv_nn(out_num=config['token_num'])
-        model.load_state_dict(torch.load(model_dir))
-        model.to(config['device']) 
-        criterion = nn.BCEWithLogitsLoss()
-
-
-    else:
-        print('No proper model loaded')
-        sys.exit(-1)
-
-    return model,criterion
-
-
-def top_filtering(logits, top_k=0, top_p=0.0, filter_value=-float('Inf')):
-    """ Filter a distribution of logits using top-k, top-p (nucleus) and/or threshold filtering
-        Args:
-            logits: logits distribution shape (vocabulary size)
-            top_k: <=0: no filtering, >0: keep only top k tokens with highest probability.
-            top_p: <=0.0: no filtering, >0.0: keep only a subset S of candidates, where S is the smallest subset
-                whose total probability mass is greater than or equal to the threshold top_p.
-                In practice, we select the highest probability tokens whose cumulative probability mass exceeds
-                the threshold top_p.
-    """
-    # batch support!
-    if top_k > 0:
-        values, _ = torch.topk(logits, top_k)
-        min_values = values[:, -1].unsqueeze(1).repeat(1, logits.shape[-1])
-        logits = torch.where(logits < min_values, 
-                             torch.ones_like(logits, dtype=logits.dtype) * -float('Inf'), 
-                             logits)
-    if top_p > 0.0:
-        # Compute cumulative probabilities of sorted tokens
-        sorted_logits, sorted_indices = torch.sort(logits, descending=True)
-        cumulative_probabilities = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
-
-        # Remove tokens with cumulative probability above the threshold
-        sorted_indices_to_remove = cumulative_probabilities > top_p
-        # Shift the indices to the right to keep also the first token above the threshold
-        sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
-        sorted_indices_to_remove[..., 0] = 0
+class GEIAEvaluator:
+    def __init__(self, blackbox_model_name='all-mpnet-base-v2'):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.blackbox_model_name = blackbox_model_name
+        self.blackbox_model = SentenceTransformer(blackbox_model_name)
         
-        sorted_logits = sorted_logits.masked_fill_(sorted_indices_to_remove, filter_value)
-        logits = torch.zeros_like(logits).scatter(1, sorted_indices, sorted_logits)
+        # Load all embedding models for evaluation
+        self.embedding_models = {}
+        for model_name, config in EMBEDDING_MODELS.items():
+            self.embedding_models[model_name] = SentenceTransformer(config['path'])
     
-    return logits
-
-def generate_sentence(config,hidden_X):
-    temperature = 0.9
-    top_k = -1
-    top_p = 0.9
-    sent = []
-    prev_input = None
-    past = None
-    model = config['model']
-    tokenizer =config['tokenizer']
-    #eos = [tokenizer.encoder["<|endoftext|>"]]
-    eos = tokenizer.encode("<|endoftext|>")
-    hidden_X_unsqueeze = torch.unsqueeze(hidden_X, 0)
-    hidden_X_unsqueeze = torch.unsqueeze(hidden_X_unsqueeze, 0)  #[1,1,embed_dim]
-    logits, past = model(inputs_embeds=hidden_X_unsqueeze,past_key_values  = past,return_dict=False)
-    logits = logits[:, -1, :] / temperature
-    logits = top_filtering(logits, top_k=top_k, top_p=top_p)
-
-    probs = torch.softmax(logits, dim=-1)
-
-    prev_input = torch.multinomial(probs, num_samples=1)
-    prev_word = prev_input.item()
-    sent.append(prev_word)
-
-    for i in range(50):
-        #logits, past = model(prev_input, past=past)
-        logits, past = model(prev_input,past_key_values  = past,return_dict=False)
-        logits = logits[:, -1, :] / temperature
-        logits = top_filtering(logits, top_k=top_k, top_p=top_p)
-
-        probs = torch.softmax(logits, dim=-1)
-
-        prev_input = torch.multinomial(probs, num_samples=1)
-        prev_word = prev_input.item()
-
-        if prev_word == eos[0]:
-            break
-        sent.append(prev_word)
+    def load_test_data(self, dataset_name, split='test'):
+        """Load test data using GEIA data pipeline"""
+        # Import GEIA data processing
+        sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'GEIA'))
+        from data_process import get_sent_list
+        
+        config = {
+            'dataset': dataset_name,
+            'data_type': split
+        }
+        
+        sentences = get_sent_list(config)
+        
+        # Use reasonable test size
+        if len(sentences) > 1000:
+            sentences = sentences[:1000]
+        
+        print(f"Loaded {len(sentences)} test sentences from {dataset_name}")
+        return sentences
     
-    output = tokenizer.decode(sent)
-
-    return output
-
-
-def eval(dataloader,config):
-    model = config['model']
-    tokenizer = config['tokenizer']
-    device = config['device']
-    model.to(device)
-    criterion = SequenceCrossEntropyLoss()
-    save_path = config['save_path']
-    sent_dict = {}
-    sent_dict['gt'] = []
-    sent_dict['pred'] = []
-    with torch.no_grad():
-        for idx,(batch_X,batch_D) in enumerate(dataloader):
-            batch_D = list(batch_D)
-            sent_list, gt_list = eval_on_batch(batch_X,batch_D,model,tokenizer,device,config)    
-            sent_dict['pred'].extend(sent_list)
-            sent_dict['gt'].extend(gt_list)
-
-        with open(save_path, 'w') as f:
-            json.dump(sent_dict, f,indent=4)
-
-
-def eval_on_batch(batch_X,batch_D,model,tokenizer,device,config):
-    decode_method = config['decode']
-    padding_token_id = tokenizer.encode(tokenizer.eos_token)[0]
-    if(not config['use_opt']):
-        tokenizer.pad_token = tokenizer.eos_token
-    batch_X = batch_X.to(device)
-    print(f'batch_X:{batch_X.size()}')
-    sent_list = []
-    gt_list = batch_D
-    for i,hidden in enumerate(batch_X):
-        inputs_embeds = hidden
-        if(decode_method == 'beam'):
-            #print('Using beam search decoding')
-            if(config['use_opt']):
-                sentence = decode_beam_search_opt.beam_decode_sentence(hidden_X=inputs_embeds, config = config,num_generate=1, beam_size = 5)
+    def evaluate_embedding_similarity(self, original_sentences, generated_sentences):
+        """Evaluate embedding similarity using GEIA approach"""
+        print("Evaluating embedding similarity...")
+        
+        # Get embeddings from black-box model
+        original_embeddings = self.blackbox_model.encode(original_sentences, convert_to_tensor=True)
+        generated_embeddings = self.blackbox_model.encode(generated_sentences, convert_to_tensor=True)
+        
+        # Calculate cosine similarity
+        cosine_scores = util.cos_sim(original_embeddings, generated_embeddings)
+        similarity_scores = [cosine_scores[i][i].item() for i in range(len(original_sentences))]
+        
+        avg_similarity = np.mean(similarity_scores)
+        std_similarity = np.std(similarity_scores)
+        
+        return {
+            'avg_similarity': avg_similarity,
+            'std_similarity': std_similarity,
+            'similarity_scores': similarity_scores
+        }
+    
+    def evaluate_text_quality(self, generated_sentences):
+        """Evaluate text quality using GEIA metrics"""
+        print("Evaluating text quality...")
+        
+        # Calculate perplexity using GEIA's eval_ppl
+        try:
+            perplexity_scores = []
+            for sentence in generated_sentences:
+                if sentence.strip():
+                    ppl = eval_ppl([sentence])
+                    perplexity_scores.append(ppl)
+            
+            avg_perplexity = np.mean(perplexity_scores) if perplexity_scores else float('inf')
+        except:
+            avg_perplexity = float('inf')
+        
+        # Calculate text length statistics
+        lengths = [len(sentence.split()) for sentence in generated_sentences if sentence.strip()]
+        avg_length = np.mean(lengths) if lengths else 0
+        
+        # Calculate diversity (unique words ratio)
+        all_words = []
+        for sentence in generated_sentences:
+            if sentence.strip():
+                all_words.extend(sentence.lower().split())
+        
+        unique_words = len(set(all_words))
+        total_words = len(all_words)
+        diversity = unique_words / total_words if total_words > 0 else 0
+        
+        return {
+            'avg_perplexity': avg_perplexity,
+            'avg_length': avg_length,
+            'diversity': diversity,
+            'num_generated': len([s for s in generated_sentences if s.strip()])
+        }
+    
+    def evaluate_attack_performance(self, attacker_name, dataset_name, split='test'):
+        """Comprehensive attack evaluation using GEIA framework"""
+        print(f"Evaluating {attacker_name} on {dataset_name}...")
+        
+        # Load test data
+        test_sentences = self.load_test_data(dataset_name, split)
+        
+        # Get black-box embeddings
+        blackbox_embeddings = self.blackbox_model.encode(test_sentences, convert_to_tensor=True)
+        
+        # Load attacker model
+        attacker_info = ATTACKER_MODELS[attacker_name.split('_')[0]]
+        model_path = os.path.join(PATHS['models_dir'], f"attacker_{attacker_name}")
+        
+        if not os.path.exists(model_path):
+            print(f"Attacker model not found: {model_path}")
+            return None
+        
+        # Load model and generate text
+        try:
+            from transformers import AutoModelForCausalLM, AutoTokenizer, T5ForConditionalGeneration, T5Tokenizer
+            
+            if attacker_name.startswith('t5'):
+                model = T5ForConditionalGeneration.from_pretrained(model_path)
+                tokenizer = T5Tokenizer.from_pretrained(attacker_info['tokenizer_path'])
             else:
-                sentence = beam_decode_sentence(hidden_X=inputs_embeds, config = config,num_generate=1, beam_size = 5)
-
-            #print(sentence)
-            sentence = sentence[0]
-        else:
-            sentence = generate_sentence(config,hidden_X=inputs_embeds)
-        sent_list.append(sentence)
-
-
-
-    return sent_list, gt_list
-
+                model = AutoModelForCausalLM.from_pretrained(model_path)
+                tokenizer = AutoTokenizer.from_pretrained(attacker_info['tokenizer_path'])
+            
+            model.to(self.device)
+            model.eval()
+            
+            # Set pad token
+            if tokenizer.pad_token is None:
+                tokenizer.pad_token = tokenizer.eos_token
+            
+            # Load projection if needed
+            projection = None
+            proj_path = os.path.join(model_path, "projection.pt")
+            if os.path.exists(proj_path):
+                from src.attackers.train_attackers import LinearProjection
+                embedding_model = attacker_name.split('_')[1]
+                embedding_dim = EMBEDDING_MODELS[embedding_model]['dim']
+                projection = LinearProjection(embedding_dim, model.config.hidden_size)
+                projection.load_state_dict(torch.load(proj_path))
+                projection.to(self.device)
+            
+            # Generate text using GEIA's eval_on_batch
+            generated_texts = []
+            batch_size = 8
+            
+            for i in tqdm(range(0, len(blackbox_embeddings), batch_size)):
+                batch_embeddings = blackbox_embeddings[i:i+batch_size]
+                
+                # Apply projection if needed
+                if projection is not None:
+                    batch_embeddings = projection(batch_embeddings)
+                
+                # Use GEIA's eval_on_batch
+                config = {
+                    'model': model,
+                    'tokenizer': tokenizer,
+                    'device': self.device,
+                    'decode': 'beam',
+                    'beam_size': EVAL_CONFIG['beam_size']
+                }
+                
+                batch_generated, _ = eval_on_batch(
+                    batch_X=batch_embeddings,
+                    batch_D=test_sentences[i:i+batch_size],
+                    model=model,
+                    tokenizer=tokenizer,
+                    device=self.device,
+                    config=config
+                )
+                
+                generated_texts.extend(batch_generated)
+            
+            # Evaluate using GEIA metrics
+            similarity_results = self.evaluate_embedding_similarity(test_sentences, generated_texts)
+            quality_results = self.evaluate_text_quality(generated_texts)
+            
+            # Combine results
+            results = {
+                'attacker_name': attacker_name,
+                'dataset_name': dataset_name,
+                'num_samples': len(test_sentences),
+                'embedding_similarity': similarity_results,
+                'text_quality': quality_results,
+                'generated_texts': generated_texts[:10],  # Save first 10 for inspection
+                'original_texts': test_sentences[:10]
+            }
+            
+            return results
+            
+        except Exception as e:
+            print(f"Error evaluating {attacker_name}: {e}")
+            return None
+    
+    def evaluate_all_attackers(self, dataset_name, split='test'):
+        """Evaluate all attackers on the dataset"""
+        print(f"Evaluating all attackers on {dataset_name}...")
+        
+        all_results = {}
+        
+        # Get list of available attackers
+        available_attackers = []
+        for model_name in ['gpt2', 'opt', 't5']:
+            for embedding_model in EMBEDDING_MODELS.keys():
+                attacker_name = f"{model_name}_{embedding_model}"
+                model_path = os.path.join(PATHS['models_dir'], f"attacker_{attacker_name}")
+                if os.path.exists(model_path):
+                    available_attackers.append(attacker_name)
+        
+        print(f"Found {len(available_attackers)} available attackers")
+        
+        # Evaluate each attacker
+        for attacker_name in available_attackers:
+            print(f"\nEvaluating {attacker_name}...")
+            results = self.evaluate_attack_performance(attacker_name, dataset_name, split)
+            
+            if results:
+                all_results[attacker_name] = results
+                
+                # Print summary
+                similarity = results['embedding_similarity']['avg_similarity']
+                perplexity = results['text_quality']['avg_perplexity']
+                print(f"  Similarity: {similarity:.4f}")
+                print(f"  Perplexity: {perplexity:.2f}")
+        
+        # Save results
+        results_path = os.path.join(
+            PATHS['results_dir'], 
+            f"geia_evaluation_{dataset_name}_{self.blackbox_model_name}.json"
+        )
+        os.makedirs(os.path.dirname(results_path), exist_ok=True)
+        
+        with open(results_path, 'w') as f:
+            json.dump(all_results, f, indent=2)
+        
+        print(f"\nResults saved to {results_path}")
+        return all_results
 
 def main():
-    parser = argparse.ArgumentParser(description='test')
-    parser.add_argument('--model_dir', type=str, default='models/attacker_gpt2_persona_sbert', help='Dir of your model')
-    parser.add_argument('--model_type', type=str, default='gpt-2', help='Type of the attacker model.')
-    parser.add_argument('--data_type', type=str, default='test', help='Type of the processed data.')
-    parser.add_argument('--save_path', type=str, default='logs/attacker_gpt2_p_sbert.log', help='Type of the processed data.')
-    parser.add_argument('--num_epochs', type=int, default=1, help='Type of the processed data.')
-    parser.add_argument('--p_simcse_flag', type=str2bool, default=True, help='Type of the processed data.')
-
+    parser = argparse.ArgumentParser(description='GEIA-based evaluation')
+    parser.add_argument('--dataset', type=str, default='sst2',
+                       choices=['sst2', 'personachat', 'abcd'],
+                       help='Dataset to evaluate on')
+    parser.add_argument('--split', type=str, default='test',
+                       choices=['train', 'dev', 'test'],
+                       help='Dataset split')
+    parser.add_argument('--blackbox_model', type=str, default='all-mpnet-base-v2',
+                       help='Black-box embedding model')
+    
     args = parser.parse_args()
-    tokenizer = AutoTokenizer.from_pretrained("microsoft/DialoGPT-medium")
-    token_num = len(tokenizer)
-    config = {}
-    config['model_dir'] = args.model_dir
-    config['model_type'] = args.model_type
-    config['num_epochs'] = args.num_epochs
-    config['save_path'] = args.save_path
-    config['p_simcse_flag'] = args.p_simcse_flag
-    config['batch_size'] = attacker_models.batch_size
-    config['data_type'] = args.data_type
-    config['device']  = torch.device("cuda")
+    
+    # Initialize evaluator
+    evaluator = GEIAEvaluator(args.blackbox_model)
+    
+    # Run evaluation
+    results = evaluator.evaluate_all_attackers(args.dataset, args.split)
+    
+    print("GEIA evaluation completed!")
 
-    config['use_trans'] = True
-    config['model'] = AutoModelForCausalLM.from_pretrained(config['model_dir'])
-    config['tokenizer'] = tokenizer
-    config['token_num'] = token_num
-    print('get_model done')
-    dataloader = get_dataloader(config)
-    print('get_dataloader done')
-    eval(dataloader,config)
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

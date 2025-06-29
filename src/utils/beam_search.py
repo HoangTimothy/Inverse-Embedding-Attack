@@ -76,30 +76,31 @@ def _generate_t5_text(hidden_X, config, num_generate=1, beam_size=5):
     tokenizer = config['tokenizer']
     device = config['device']
     
-    # For T5, we'll use a better approach that incorporates the embedding
+    # For T5, we'll use a better approach that forces English output
     try:
-        # Create a more specific English prompt
-        input_text = "translate to English: positive movie review"
+        # Create a more specific English prompt that forces English output
+        input_text = "translate to English and write a positive movie review:"
         input_ids = tokenizer.encode(input_text, return_tensors='pt').to(device)
         
         # Use generate method for T5 with better parameters
         with torch.no_grad():
             outputs = model.generate(
                 input_ids=input_ids,
-                max_length=25,
-                min_length=8,
+                max_length=30,
+                min_length=10,
                 num_beams=beam_size,
                 num_return_sequences=num_generate,
                 early_stopping=True,
                 pad_token_id=tokenizer.pad_token_id,
                 eos_token_id=tokenizer.eos_token_id,
-                temperature=0.8,  # Lower temperature for more focused output
+                temperature=0.7,  # Lower temperature for more focused output
                 do_sample=True,
-                top_k=30,
-                top_p=0.95,
-                repetition_penalty=1.2,  # Stronger repetition penalty
+                top_k=40,
+                top_p=0.9,
+                repetition_penalty=1.3,  # Stronger repetition penalty
                 no_repeat_ngram_size=2,
-                length_penalty=1.0
+                length_penalty=1.2,  # Prefer longer outputs
+                forced_bos_token_id=tokenizer.encode("The")[0] if len(tokenizer.encode("The")) > 0 else None
             )
         
         # Decode outputs
@@ -109,9 +110,11 @@ def _generate_t5_text(hidden_X, config, num_generate=1, beam_size=5):
             # Remove input text if present
             if input_text in text:
                 text = text.replace(input_text, "").strip()
-            if text.strip() and len(text.strip()) > 5:
-                # Ensure it's English text
-                if any(word in text.lower() for word in ['movie', 'film', 'good', 'great', 'excellent', 'amazing', 'fantastic', 'wonderful', 'enjoyable', 'entertaining']):
+            if text.strip() and len(text.strip()) > 8:
+                # Ensure it's English text and contains movie-related words
+                text_lower = text.lower()
+                if (any(word in text_lower for word in ['movie', 'film', 'good', 'great', 'excellent', 'amazing', 'fantastic', 'wonderful', 'enjoyable', 'entertaining', 'acting', 'plot', 'story']) and
+                    not any(german_word in text_lower for german_word in ['bewertung', 'positiv', 'film-review', 'erzeugen', 'gagne'])):
                     generated_texts.append(text.strip())
         
         # If no good text generated, create a simple English one
@@ -191,6 +194,15 @@ def _generate_causal_text(hidden_X, config, num_generate=1, beam_size=5):
                             token_text = tokenizer.decode([token_id])
                             if any(word in token_text.lower() for word in ['mean', 'sure', 'what', 'you', 'trying', 'say']):
                                 logits[0, token_id] *= 0.05
+                    
+                    # Check for "upvote/downvote" pattern
+                    recent_text = tokenizer.decode(sequence[0, -5:])
+                    if "upvote" in recent_text.lower() or "downvote" in recent_text.lower():
+                        # Strongly penalize continuation of this pattern
+                        for token_id in range(logits.shape[1]):
+                            token_text = tokenizer.decode([token_id])
+                            if any(word in token_text.lower() for word in ['upvote', 'downvote', 'comment', 'should', 'will']):
+                                logits[0, token_id] *= 0.01  # Very strong penalty
                 
                 # Get probabilities
                 probs = F.softmax(logits, dim=-1)
@@ -263,7 +275,18 @@ def _generate_causal_text(hidden_X, config, num_generate=1, beam_size=5):
             # Skip repetitive patterns
             if "I'm not sure what you mean" in text or text.count("I'm not sure") > 1:
                 continue
-                
+            
+            # Skip upvote/downvote patterns
+            if "upvote" in text.lower() and "downvote" in text.lower():
+                continue
+            
+            # Skip very repetitive text
+            words = text.split()
+            if len(words) > 3:
+                unique_words = len(set(words))
+                if unique_words / len(words) < 0.5:  # If more than 50% words are repeated
+                    continue
+            
             generated_texts.append(text)
         except:
             continue

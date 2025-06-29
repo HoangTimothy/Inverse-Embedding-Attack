@@ -106,17 +106,25 @@ class InverseEmbeddingAttacker:
         self.model.train()
     
     def load_embedding_data(self, dataset_name, split='train'):
-        """Load embedding data for training"""
+        """Load embedding data for training using proper data pipeline"""
         embedding_path = os.path.join(
             PATHS['embeddings_dir'],
             f"{dataset_name}_{split}_{self.embedding_model_name}.json"
         )
+        
+        if not os.path.exists(embedding_path):
+            print(f"Embedding file not found: {embedding_path}")
+            print("Please run prepare_embeddings.py first to create embedding datasets")
+            raise FileNotFoundError(f"Embedding file not found: {embedding_path}")
         
         with open(embedding_path, 'r') as f:
             data = json.load(f)
         
         embeddings = torch.tensor(data['embeddings'], dtype=torch.float32)
         sentences = data['sentences']
+        
+        print(f"Loaded {len(sentences)} samples from {embedding_path}")
+        print(f"Embedding shape: {embeddings.shape}")
         
         return embeddings, sentences
     
