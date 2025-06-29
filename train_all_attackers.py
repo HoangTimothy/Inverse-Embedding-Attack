@@ -46,20 +46,30 @@ def train_attacker(attacker_model, config, training_params):
     print(f"Needs projection: {attacker_config['needs_projection']}")
     
     try:
+        # Map embedding models to attacker models
+        attacker_model_mapping = {
+            'stsb-roberta-base': 'gpt2',
+            'all-MiniLM-L6-v2': 'opt', 
+            'paraphrase-MiniLM-L6-v2': 't5'
+        }
+        
+        attacker_model_name = attacker_model_mapping.get(attacker_model)
+        if attacker_model_name is None:
+            raise ValueError(f"Unknown embedding model: {attacker_model}")
+        
+        print(f"Using attacker model: {attacker_model_name}")
+        
         # Initialize attacker
         attacker = InverseEmbeddingAttacker(
-            attacker_model_name=attacker_model.split('_')[0],  # Extract model type (gpt2, opt, t5)
-            embedding_model_name=attacker_model,
+            attacker_model_name=attacker_model_name,  # gpt2, opt, t5
+            embedding_model_name=attacker_model,      # embedding model name
             embedding_dim=embedding_dim
         )
         
         # Train attacker
         attacker.train(
             dataset_name=dataset_name,
-            split='train',
-            num_epochs=training_params['num_epochs'],
-            batch_size=training_params['batch_size'],
-            learning_rate=training_params['learning_rate']
+            split='train'
         )
         
         print(f"✅ Training completed for {attacker_model}")
@@ -67,6 +77,8 @@ def train_attacker(attacker_model, config, training_params):
         
     except Exception as e:
         print(f"❌ Error training {attacker_model}: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def train_all_attackers():
