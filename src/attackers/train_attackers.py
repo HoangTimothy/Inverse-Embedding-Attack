@@ -15,9 +15,19 @@ import argparse
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from config import ATTACKER_MODELS, TRAIN_CONFIG, PATHS, EVAL_CONFIG
 
-# Import from local files
-from attacker_models import SequenceCrossEntropyLoss
-from decode_beam_search import beam_decode_sentence
+# Import from local files - Fix the paths
+current_dir = os.path.dirname(__file__)
+sys.path.insert(0, current_dir)
+
+try:
+    from attacker_models import SequenceCrossEntropyLoss
+    from decode_beam_search import beam_decode_sentence
+    print("✅ Successfully imported local modules")
+except ImportError as e:
+    print(f"❌ Error importing local modules: {e}")
+    print(f"Current directory: {current_dir}")
+    print(f"Files in directory: {os.listdir(current_dir)}")
+    raise
 
 class EmbeddingDataset(Dataset):
     def __init__(self, embeddings, sentences):

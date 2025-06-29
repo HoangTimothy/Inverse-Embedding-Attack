@@ -64,19 +64,20 @@ def create_fallback_data_process():
         
         try:
             if dataset == 'sst2':
-                dataset_obj = load_dataset('glue', 'sst2', split=data_type)
+                # Fix cache_dir issue
+                dataset_obj = load_dataset('glue', 'sst2', split=data_type, cache_dir="./data_cache")
                 sentences = [d['sentence'] for d in dataset_obj]
             elif dataset == 'personachat':
                 # Use a simpler dataset for PersonaChat
-                dataset_obj = load_dataset('glue', 'sst2', split=data_type)
+                dataset_obj = load_dataset('glue', 'sst2', split=data_type, cache_dir="./data_cache")
                 sentences = [d['sentence'] for d in dataset_obj]
             elif dataset == 'abcd':
                 # Use SST-2 as fallback for ABCD
-                dataset_obj = load_dataset('glue', 'sst2', split=data_type)
+                dataset_obj = load_dataset('glue', 'sst2', split=data_type, cache_dir="./data_cache")
                 sentences = [d['sentence'] for d in dataset_obj]
             else:
                 # Default to SST-2
-                dataset_obj = load_dataset('glue', 'sst2', split=data_type)
+                dataset_obj = load_dataset('glue', 'sst2', split=data_type, cache_dir="./data_cache")
                 sentences = [d['sentence'] for d in dataset_obj]
             
             # Limit to 10,000 samples
