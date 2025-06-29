@@ -55,15 +55,24 @@ class InverseEmbeddingAttacker:
         # Initialize projection layer if needed
         self.projection = None
         if embedding_dim != 1280:  # GPT-2 embedding dimension
-            self.projection = LinearProjection(embedding_dim, 1280).to(self.device)
+            self.projection = LinearProjection(embedding_dim, 1280)
+            self.projection.to(self.device)
+            print(f"Created projection layer: {embedding_dim} -> 1280")
     
     def load_attacker_model(self):
         """Load attacker model from GEIA framework"""
         model_config = ATTACKER_MODELS[self.attacker_model_name]
         
         print(f"Loading attacker model: {self.attacker_model_name}")
-        self.model = AutoModelForCausalLM.from_pretrained(model_config['path'])
-        self.tokenizer = AutoTokenizer.from_pretrained(model_config['path'])
+        
+        # Use smaller models for Colab compatibility
+        if self.attacker_model_name == 'gpt2':
+            model_path = 'microsoft/DialoGPT-medium'  # Use medium instead of large
+        else:
+            model_path = model_config['path']
+            
+        self.model = AutoModelForCausalLM.from_pretrained(model_path)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
         
         # Set pad token
         if self.tokenizer.pad_token is None:
@@ -89,6 +98,9 @@ class InverseEmbeddingAttacker:
     
     def train_on_batch(self, batch_embeddings, batch_sentences):
         """Training step for one batch"""
+        # Move embeddings to device first
+        batch_embeddings = batch_embeddings.to(self.device)
+        
         # Tokenize sentences
         inputs = self.tokenizer(
             batch_sentences, 
@@ -109,18 +121,17 @@ class InverseEmbeddingAttacker:
             batch_embeddings = self.projection(batch_embeddings)
         
         # Concatenate embeddings with input embeddings
-        batch_embeddings = batch_embeddings.to(self.device)
         batch_embeddings_unsqueeze = torch.unsqueeze(batch_embeddings, 1)
         inputs_embeds = torch.cat((batch_embeddings_unsqueeze, input_emb), dim=1)
         
         # Forward pass
-        logits, _ = self.model(inputs_embeds=inputs_embeds, return_dict=False)
-        logits = logits[:, :-1].contiguous()
+        outputs = self.model(inputs_embeds=inputs_embeds, return_dict=True)
+        logits = outputs.logits[:, :-1].contiguous()
         target = labels.contiguous()
         
         # Calculate loss
         criterion = SequenceCrossEntropyLoss()
-        target_mask = torch.ones_like(target).float()
+        target_mask = torch.ones_like(target).float().to(self.device)
         loss = criterion(logits, target, target_mask, label_smoothing=0.02, reduce="batch")
         
         return loss
@@ -214,8 +225,9 @@ class InverseEmbeddingAttacker:
         # Load projection if exists
         proj_path = os.path.join(model_path, "projection.pt")
         if os.path.exists(proj_path):
-            self.projection = LinearProjection(self.embedding_dim, 1280).to(self.device)
+            self.projection = LinearProjection(self.embedding_dim, 1280)
             self.projection.load_state_dict(torch.load(proj_path))
+            self.projection.to(self.device)
         
         self.model.eval()
 

@@ -35,23 +35,23 @@ EMBEDDING_MODELS = {
 # Attacker models configuration
 ATTACKER_MODELS = {
     'gpt2': {
-        'path': 'microsoft/DialoGPT-large',
+        'path': 'microsoft/DialoGPT-medium',
         'type': 'causal_lm'
     },
     'opt': {
-        'path': 'facebook/opt-350m',
+        'path': 'facebook/opt-125m',
         'type': 'causal_lm'
     },
     't5': {
-        'path': 't5-base',
+        'path': 't5-small',
         'type': 'seq2seq'
     }
 }
 
 # Training configuration
 TRAIN_CONFIG = {
-    'batch_size': 16,
-    'num_epochs': 10,
+    'batch_size': 8,
+    'num_epochs': 5,
     'learning_rate': 3e-5,
     'max_length': 40,
     'device': torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
