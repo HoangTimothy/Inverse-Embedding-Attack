@@ -154,7 +154,10 @@ class BlackBoxTester:
             
             # Apply projection if needed
             if projection is not None:
+                # Reshape embedding to match projection input
+                embedding_tensor = embedding_tensor.unsqueeze(0)  # Add batch dimension
                 embedding_tensor = projection(embedding_tensor)
+                embedding_tensor = embedding_tensor.squeeze(0)  # Remove batch dimension
             
             # Generate text using beam search
             try:
