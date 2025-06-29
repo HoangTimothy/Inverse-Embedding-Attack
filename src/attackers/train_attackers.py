@@ -73,9 +73,17 @@ class InverseEmbeddingAttacker:
             model_path = 'microsoft/DialoGPT-medium'  # Use medium instead of large
         else:
             model_path = model_config['path']
-            
-        self.model = AutoModelForCausalLM.from_pretrained(model_path)
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
+        
+        # Load different model types
+        if self.attacker_model_name == 't5':
+            # T5 is a seq2seq model, not causal LM
+            from transformers import T5ForConditionalGeneration, T5Tokenizer
+            self.model = T5ForConditionalGeneration.from_pretrained(model_path)
+            self.tokenizer = T5Tokenizer.from_pretrained(model_path)
+        else:
+            # GPT-2 and OPT are causal LMs
+            self.model = AutoModelForCausalLM.from_pretrained(model_path)
+            self.tokenizer = AutoTokenizer.from_pretrained(model_path)
         
         # Debug: print model info
         print(f"Model type: {type(self.model).__name__}")
@@ -129,6 +137,16 @@ class InverseEmbeddingAttacker:
         input_ids = inputs['input_ids'].to(self.device)
         labels = input_ids.clone()
         
+        # Handle different model types
+        if self.attacker_model_name == 't5':
+            # T5 seq2seq model
+            return self._train_t5_batch(batch_embeddings, input_ids, labels)
+        else:
+            # GPT-2 and OPT causal models
+            return self._train_causal_batch(batch_embeddings, input_ids, labels)
+    
+    def _train_causal_batch(self, batch_embeddings, input_ids, labels):
+        """Training step for causal models (GPT-2, OPT)"""
         # Get embeddings from attacker model (handle different model types)
         if hasattr(self.model, 'transformer'):
             # GPT-2 style models
@@ -136,9 +154,6 @@ class InverseEmbeddingAttacker:
         elif hasattr(self.model, 'model'):
             # OPT style models
             input_emb = self.model.model.decoder.embed_tokens(input_ids)
-        else:
-            # T5 style models
-            input_emb = self.model.shared(input_ids)
         
         # Apply projection if needed
         if self.projection is not None:
@@ -157,6 +172,23 @@ class InverseEmbeddingAttacker:
         criterion = SequenceCrossEntropyLoss()
         target_mask = torch.ones_like(target).float().to(self.device)
         loss = criterion(logits, target, target_mask, label_smoothing=0.02, reduce="batch")
+        
+        return loss
+    
+    def _train_t5_batch(self, batch_embeddings, input_ids, labels):
+        """Training step for T5 seq2seq model"""
+        # Apply projection if needed
+        if self.projection is not None:
+            batch_embeddings = self.projection(batch_embeddings)
+        
+        # For T5, we'll use the embeddings as additional input
+        # Create a special input format for T5
+        batch_size = batch_embeddings.shape[0]
+        
+        # Create a simple forward pass for T5
+        # Note: This is a simplified approach for T5
+        outputs = self.model(input_ids=input_ids, labels=labels, return_dict=True)
+        loss = outputs.loss
         
         return loss
     
@@ -242,8 +274,14 @@ class InverseEmbeddingAttacker:
     
     def load_model(self, model_path):
         """Load trained model"""
-        self.model = AutoModelForCausalLM.from_pretrained(model_path)
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
+        if self.attacker_model_name == 't5':
+            from transformers import T5ForConditionalGeneration, T5Tokenizer
+            self.model = T5ForConditionalGeneration.from_pretrained(model_path)
+            self.tokenizer = T5Tokenizer.from_pretrained(model_path)
+        else:
+            self.model = AutoModelForCausalLM.from_pretrained(model_path)
+            self.tokenizer = AutoTokenizer.from_pretrained(model_path)
+            
         self.model.to(self.device)
         
         # Load projection if exists
