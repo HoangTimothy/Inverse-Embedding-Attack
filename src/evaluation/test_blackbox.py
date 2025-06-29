@@ -150,14 +150,16 @@ class BlackBoxTester:
                 temp_projection = torch.nn.Linear(blackbox_dim, embedding_dim).to(self.device)
                 
                 # Load the original projection
-                projection = LinearProjection(embedding_dim, model.config.hidden_size)
-                projection.load_state_dict(torch.load(proj_path))
-                projection.to(self.device)
+                original_projection = LinearProjection(embedding_dim, model.config.hidden_size)
+                original_projection.load_state_dict(torch.load(proj_path))
+                original_projection.to(self.device)
                 
-                # Combine projections
+                # Create a combined projection function
                 def combined_projection(x):
-                    x = temp_projection(x)
-                    return projection(x)
+                    # x shape: (batch_size, blackbox_dim)
+                    x = temp_projection(x)  # -> (batch_size, embedding_dim)
+                    x = original_projection(x)  # -> (batch_size, model_dim)
+                    return x
                 
                 projection = combined_projection
             else:

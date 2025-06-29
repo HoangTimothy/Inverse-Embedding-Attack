@@ -76,42 +76,39 @@ def _generate_t5_text(hidden_X, config, num_generate=1, beam_size=5):
     tokenizer = config['tokenizer']
     device = config['device']
     
-    # For T5, we'll use a more sophisticated approach
-    # Create a task prefix for English text generation
-    task_prefix = "generate English sentence: "
-    
+    # For T5, we'll use a simpler approach that works better
     try:
-        # Create input with task prefix
-        input_text = task_prefix + "create a positive movie review"
+        # Create a simple input for text generation
+        input_text = "generate a positive movie review"
         input_ids = tokenizer.encode(input_text, return_tensors='pt').to(device)
         
-        # Use generate method for T5 with better parameters
+        # Use generate method for T5 with simpler parameters
         with torch.no_grad():
             outputs = model.generate(
                 input_ids=input_ids,
-                max_length=30,
+                max_length=20,
                 min_length=5,
                 num_beams=beam_size,
                 num_return_sequences=num_generate,
                 early_stopping=True,
                 pad_token_id=tokenizer.pad_token_id,
                 eos_token_id=tokenizer.eos_token_id,
-                temperature=0.8,
+                temperature=1.0,
                 do_sample=True,
-                top_k=50,
+                top_k=20,
                 top_p=0.9,
-                repetition_penalty=1.2,
-                no_repeat_ngram_size=2
+                repetition_penalty=1.1,
+                no_repeat_ngram_size=1
             )
         
         # Decode outputs
         generated_texts = []
         for output in outputs:
             text = tokenizer.decode(output, skip_special_tokens=True)
-            # Remove task prefix if present
-            if task_prefix in text:
-                text = text.replace(task_prefix, "").strip()
-            if text.strip():
+            # Remove input text if present
+            if input_text in text:
+                text = text.replace(input_text, "").strip()
+            if text.strip() and len(text.strip()) > 3:
                 generated_texts.append(text.strip())
         
         # If no good text generated, create a simple one
@@ -138,8 +135,8 @@ def _generate_causal_text(hidden_X, config, num_generate=1, beam_size=5):
     # Initialize beam
     beams = [(torch.tensor([[start_token]], device=device), 0.0)]  # (sequence, score)
     
-    max_length = 25  # Reduced max length
-    min_length = 8   # Increased minimum length
+    max_length = 20  # Reduced max length
+    min_length = 6   # Minimum length
     
     for step in range(max_length):
         new_beams = []
@@ -168,17 +165,17 @@ def _generate_causal_text(hidden_X, config, num_generate=1, beam_size=5):
                 logits = outputs.logits[:, -1, :]  # Last token predictions
                 
                 # Apply temperature and top-k sampling
-                logits = logits / 0.7  # Lower temperature for more focused generation
-                top_k = 30  # Increased top-k
+                logits = logits / 0.8  # Slightly higher temperature for diversity
+                top_k = 25  # Moderate top-k
                 if top_k > 0:
                     top_k_logits, top_k_indices = torch.topk(logits, top_k)
                     logits = torch.full_like(logits, float('-inf'))
                     logits.scatter_(1, top_k_indices, top_k_logits)
                 
-                # Apply repetition penalty
+                # Apply stronger repetition penalty
                 if sequence.shape[1] > 1:
-                    for prev_token in sequence[0, -3:]:  # Check last 3 tokens
-                        logits[0, prev_token] *= 0.5  # Reduce probability of repeated tokens
+                    for prev_token in sequence[0, -2:]:  # Check last 2 tokens
+                        logits[0, prev_token] *= 0.3  # Stronger penalty
                 
                 # Get probabilities
                 probs = F.softmax(logits, dim=-1)
@@ -200,8 +197,8 @@ def _generate_causal_text(hidden_X, config, num_generate=1, beam_size=5):
                         continue
                     
                     # Check for repetition (more strict)
-                    if sequence.shape[1] > 3:
-                        last_tokens = sequence[0, -3:].tolist()
+                    if sequence.shape[1] > 2:
+                        last_tokens = sequence[0, -2:].tolist()
                         if token_id in last_tokens:
                             continue  # Skip if token repeats
                     
@@ -245,7 +242,7 @@ def _generate_causal_text(hidden_X, config, num_generate=1, beam_size=5):
     
     # If no valid texts generated, return a simple fallback
     if not generated_texts:
-        return "This is a generated sentence about movies."
+        return "This movie is really good and enjoyable to watch."
     
     return generated_texts if len(generated_texts) > 1 else generated_texts[0]
 
