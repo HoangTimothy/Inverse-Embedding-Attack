@@ -49,15 +49,18 @@ class InverseEmbeddingAttacker:
         self.embedding_model_name = embedding_model_name
         self.embedding_dim = embedding_dim
         
-        # Load attacker model
+        # Load attacker model first
         self.load_attacker_model()
+        
+        # Get the correct embedding dimension for the attacker model
+        target_dim = self.model.config.hidden_size  # This will be 1024 for GPT-2
         
         # Initialize projection layer if needed
         self.projection = None
-        if embedding_dim != 1280:  # GPT-2 embedding dimension
-            self.projection = LinearProjection(embedding_dim, 1280)
+        if embedding_dim != target_dim:
+            self.projection = LinearProjection(embedding_dim, target_dim)
             self.projection.to(self.device)
-            print(f"Created projection layer: {embedding_dim} -> 1280")
+            print(f"Created projection layer: {embedding_dim} -> {target_dim}")
     
     def load_attacker_model(self):
         """Load attacker model from GEIA framework"""
@@ -73,6 +76,10 @@ class InverseEmbeddingAttacker:
             
         self.model = AutoModelForCausalLM.from_pretrained(model_path)
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)
+        
+        # Debug: print model info
+        print(f"Model hidden size: {self.model.config.hidden_size}")
+        print(f"Model vocab size: {self.model.config.vocab_size}")
         
         # Set pad token
         if self.tokenizer.pad_token is None:
@@ -101,6 +108,9 @@ class InverseEmbeddingAttacker:
         # Move embeddings to device first
         batch_embeddings = batch_embeddings.to(self.device)
         
+        # Debug: print dimensions
+        print(f"Input embeddings shape: {batch_embeddings.shape}")
+        
         # Tokenize sentences
         inputs = self.tokenizer(
             batch_sentences, 
@@ -115,13 +125,18 @@ class InverseEmbeddingAttacker:
         
         # Get embeddings from attacker model
         input_emb = self.model.transformer.wte(input_ids)
+        print(f"Model input embeddings shape: {input_emb.shape}")
         
         # Apply projection if needed
         if self.projection is not None:
             batch_embeddings = self.projection(batch_embeddings)
+            print(f"Projected embeddings shape: {batch_embeddings.shape}")
         
         # Concatenate embeddings with input embeddings
         batch_embeddings_unsqueeze = torch.unsqueeze(batch_embeddings, 1)
+        print(f"Unsqueezed embeddings shape: {batch_embeddings_unsqueeze.shape}")
+        print(f"Input embeddings shape: {input_emb.shape}")
+        
         inputs_embeds = torch.cat((batch_embeddings_unsqueeze, input_emb), dim=1)
         
         # Forward pass
@@ -225,7 +240,7 @@ class InverseEmbeddingAttacker:
         # Load projection if exists
         proj_path = os.path.join(model_path, "projection.pt")
         if os.path.exists(proj_path):
-            self.projection = LinearProjection(self.embedding_dim, 1280)
+            self.projection = LinearProjection(self.embedding_dim, self.model.config.hidden_size)
             self.projection.load_state_dict(torch.load(proj_path))
             self.projection.to(self.device)
         
