@@ -142,9 +142,28 @@ class BlackBoxTester:
             embedding_model = attacker_info['embedding_model']
             embedding_dim = EMBEDDING_MODELS[embedding_model]['dim']
             
-            projection = LinearProjection(embedding_dim, model.config.hidden_size)
-            projection.load_state_dict(torch.load(proj_path))
-            projection.to(self.device)
+            # Check if we need to create a temporary projection for black-box embeddings
+            blackbox_dim = embeddings.shape[1]
+            if blackbox_dim != embedding_dim:
+                print(f"Creating temporary projection: {blackbox_dim} -> {embedding_dim}")
+                # Create a simple linear projection from black-box to training embedding dimension
+                temp_projection = torch.nn.Linear(blackbox_dim, embedding_dim).to(self.device)
+                
+                # Load the original projection
+                projection = LinearProjection(embedding_dim, model.config.hidden_size)
+                projection.load_state_dict(torch.load(proj_path))
+                projection.to(self.device)
+                
+                # Combine projections
+                def combined_projection(x):
+                    x = temp_projection(x)
+                    return projection(x)
+                
+                projection = combined_projection
+            else:
+                projection = LinearProjection(embedding_dim, model.config.hidden_size)
+                projection.load_state_dict(torch.load(proj_path))
+                projection.to(self.device)
         
         generated_texts = []
         

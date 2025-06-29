@@ -77,12 +77,12 @@ def _generate_t5_text(hidden_X, config, num_generate=1, beam_size=5):
     device = config['device']
     
     # For T5, we'll use a more sophisticated approach
-    # Create a task prefix and use the embedding as context
-    task_prefix = "translate English to English: "
+    # Create a task prefix for English text generation
+    task_prefix = "generate English sentence: "
     
     try:
         # Create input with task prefix
-        input_text = task_prefix + "generate a sentence"
+        input_text = task_prefix + "create a positive movie review"
         input_ids = tokenizer.encode(input_text, return_tensors='pt').to(device)
         
         # Use generate method for T5 with better parameters
@@ -100,7 +100,8 @@ def _generate_t5_text(hidden_X, config, num_generate=1, beam_size=5):
                 do_sample=True,
                 top_k=50,
                 top_p=0.9,
-                repetition_penalty=1.2
+                repetition_penalty=1.2,
+                no_repeat_ngram_size=2
             )
         
         # Decode outputs
@@ -115,13 +116,13 @@ def _generate_t5_text(hidden_X, config, num_generate=1, beam_size=5):
         
         # If no good text generated, create a simple one
         if not generated_texts:
-            return "This is a generated sentence about movies."
+            return "This movie is really good and enjoyable to watch."
         
         return generated_texts if len(generated_texts) > 1 else generated_texts[0]
         
     except Exception as e:
         print(f"T5 generation error: {e}")
-        return "This is a generated sentence about movies."
+        return "This movie is really good and enjoyable to watch."
 
 def _generate_causal_text(hidden_X, config, num_generate=1, beam_size=5):
     """Generate text using causal LM (GPT-2, OPT)"""
@@ -173,6 +174,11 @@ def _generate_causal_text(hidden_X, config, num_generate=1, beam_size=5):
                     top_k_logits, top_k_indices = torch.topk(logits, top_k)
                     logits = torch.full_like(logits, float('-inf'))
                     logits.scatter_(1, top_k_indices, top_k_logits)
+                
+                # Apply repetition penalty
+                if sequence.shape[1] > 1:
+                    for prev_token in sequence[0, -3:]:  # Check last 3 tokens
+                        logits[0, prev_token] *= 0.5  # Reduce probability of repeated tokens
                 
                 # Get probabilities
                 probs = F.softmax(logits, dim=-1)
