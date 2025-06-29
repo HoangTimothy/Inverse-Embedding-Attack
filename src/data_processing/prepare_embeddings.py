@@ -12,9 +12,35 @@ import argparse
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from config import EMBEDDING_MODELS, DATASET_PATHS, PATHS, TRAIN_CONFIG
 
-# Import GEIA data processing
-sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'GEIA'))
-from data_process import get_sent_list
+# Import GEIA data processing - More robust path handling
+def import_geia_data_process():
+    """Import GEIA data_process module with proper path handling"""
+    # Try multiple possible paths
+    possible_paths = [
+        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'GEIA'),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '..', 'GEIA'),
+        'GEIA',
+        '../GEIA'
+    ]
+    
+    for geia_path in possible_paths:
+        if os.path.exists(geia_path):
+            print(f"Found GEIA at: {geia_path}")
+            sys.path.insert(0, geia_path)
+            try:
+                from data_process import get_sent_list
+                print(f"✅ Successfully imported GEIA data_process from {geia_path}")
+                return get_sent_list
+            except ImportError as e:
+                print(f"❌ Failed to import from {geia_path}: {e}")
+                sys.path.remove(geia_path)
+                continue
+    
+    # If all paths failed, raise error
+    raise ImportError("Could not find GEIA data_process module. Please ensure GEIA directory exists.")
+
+# Import the function
+get_sent_list = import_geia_data_process()
 
 class EmbeddingPreparer:
     def __init__(self):
