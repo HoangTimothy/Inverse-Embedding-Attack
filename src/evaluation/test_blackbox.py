@@ -129,9 +129,9 @@ class BlackBoxTester:
         projection = None
         proj_path = os.path.join(attacker_path, "projection.pt")
         if os.path.exists(proj_path):
-            from src.attackers.train_attackers import LinearProjection
+            import torch.nn as nn
             embedding_dim = embeddings.shape[1]
-            projection = LinearProjection(embedding_dim, model.config.hidden_size)
+            projection = nn.Linear(embedding_dim, model.config.hidden_size)
             projection.load_state_dict(torch.load(proj_path))
             projection.to(self.device)
         
@@ -225,43 +225,52 @@ class BlackBoxTester:
         # Get black-box embeddings
         blackbox_embeddings = self.get_blackbox_embeddings(test_sentences)
         
-        # Align embeddings if needed
-        aligned_embeddings = self.align_embeddings(blackbox_embeddings, self.target_dim)
-        
-        results = {}
+        all_results = {}
         
         # Test each attacker
-        for attacker_name, attacker_info in self.attackers.items():
-            print(f"\nTesting attacker: {attacker_name}")
+        for attacker_key, attacker_info in self.attackers.items():
+            print(f"\nTesting attacker: {attacker_key}")
             
             try:
                 # Generate text using attacker
-                generated_texts = self.generate_text(aligned_embeddings, attacker_info)
+                generated_texts = self.generate_text(blackbox_embeddings, attacker_info)
                 
-                # Evaluate results
-                attack_results = self.evaluate_attack(test_sentences, generated_texts)
-                results[attacker_name] = attack_results
+                # Debug: show some examples
+                print(f"Generated {len(generated_texts)} texts")
+                for i in range(min(3, len(test_sentences))):
+                    print(f"Original: {test_sentences[i]}")
+                    print(f"Generated: {generated_texts[i]}")
+                    print("---")
                 
-                print(f"Results for {attacker_name}:")
-                print(f"  Embedding Similarity: {attack_results['avg_embedding_similarity']:.4f}")
-                print(f"  Exact Match Rate: {attack_results['exact_match_rate']:.4f}")
-                print(f"  BLEU Score: {attack_results['avg_bleu_score']:.4f}")
+                # Evaluate attack
+                results = self.evaluate_attack(test_sentences, generated_texts)
+                all_results[attacker_key] = results
+                
+                print(f"Results for {attacker_key}:")
+                print(f"  Embedding Similarity: {results['avg_embedding_similarity']:.4f}")
+                print(f"  Exact Match Rate: {results['exact_match_rate']:.4f}")
+                print(f"  BLEU Score: {results['avg_bleu_score']:.4f}")
                 
             except Exception as e:
-                print(f"Error testing attacker {attacker_name}: {e}")
-                results[attacker_name] = {'error': str(e)}
+                print(f"Error testing attacker {attacker_key}: {e}")
+                all_results[attacker_key] = {
+                    'avg_embedding_similarity': 0.0,
+                    'exact_match_rate': 0.0,
+                    'avg_bleu_score': 0.0,
+                    'error': str(e)
+                }
         
         # Save results
-        results_path = os.path.join(
-            PATHS['results_dir'],
-            f"blackbox_test_{dataset_name}_{self.blackbox_model_name}.json"
-        )
+        results_path = os.path.join(PATHS['results_dir'], f"blackbox_test_{dataset_name}_{self.blackbox_model_name}.json")
+        os.makedirs(os.path.dirname(results_path), exist_ok=True)
         
         with open(results_path, 'w') as f:
-            json.dump(results, f, indent=2)
+            json.dump(all_results, f, indent=2)
         
         print(f"\nResults saved to {results_path}")
-        return results
+        print("Black-box testing completed!")
+        
+        return all_results
 
 def main():
     parser = argparse.ArgumentParser(description='Test attackers on black-box model')
