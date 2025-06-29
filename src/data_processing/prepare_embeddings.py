@@ -37,13 +37,13 @@ class EmbeddingPreparer:
             if dataset_name == 'sst2':
                 if split == 'dev':
                     split = 'validation'
-                # Add cache_dir to avoid path issues
-                dataset = load_dataset('glue', 'sst2', cache_dir="./data_cache", split=split)
+                # Remove cache_dir to avoid path issues
+                dataset = load_dataset('glue', 'sst2', split=split)
                 sentences = [item['sentence'] for item in dataset]
             elif dataset_name == 'personachat':
                 if split == 'dev':
                     split = 'validation'
-                dataset = load_dataset('bavard/personachat_truecased', cache_dir="./data_cache", split=split)
+                dataset = load_dataset('bavard/personachat_truecased', split=split)
                 sentences = []
                 for item in dataset:
                     # Extract all utterances from conversation

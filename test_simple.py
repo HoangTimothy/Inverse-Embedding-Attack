@@ -91,8 +91,8 @@ def test_dataset_loading():
     try:
         from datasets import load_dataset
         
-        # Try to load a small dataset
-        dataset = load_dataset('glue', 'sst2', cache_dir="./data_cache", split='train[:10]')
+        # Try to load a small dataset without cache_dir to avoid path issues
+        dataset = load_dataset('glue', 'sst2', split='train[:10]')
         sentences = [item['sentence'] for item in dataset]
         print(f"✅ Successfully loaded {len(sentences)} sentences from SST-2")
         
