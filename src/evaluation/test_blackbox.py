@@ -129,9 +129,17 @@ class BlackBoxTester:
         projection = None
         proj_path = os.path.join(attacker_path, "projection.pt")
         if os.path.exists(proj_path):
-            import torch.nn as nn
+            # Use the same LinearProjection class as in training
+            class LinearProjection(torch.nn.Module):
+                def __init__(self, in_dim, out_dim):
+                    super(LinearProjection, self).__init__()
+                    self.fc = torch.nn.Linear(in_dim, out_dim)
+                
+                def forward(self, x):
+                    return self.fc(x)
+            
             embedding_dim = embeddings.shape[1]
-            projection = nn.Linear(embedding_dim, model.config.hidden_size)
+            projection = LinearProjection(embedding_dim, model.config.hidden_size)
             projection.load_state_dict(torch.load(proj_path))
             projection.to(self.device)
         

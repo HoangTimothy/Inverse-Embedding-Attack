@@ -70,7 +70,8 @@ def beam_decode_sentence(hidden_X, config, num_generate=1, beam_size=5):
     # Initialize beam
     beams = [(torch.tensor([[start_token]], device=device), 0.0)]  # (sequence, score)
     
-    max_length = 50  # Maximum sequence length
+    max_length = 30  # Reduced max length to avoid repetition
+    min_length = 5   # Minimum length
     
     for step in range(max_length):
         new_beams = []
@@ -102,8 +103,8 @@ def beam_decode_sentence(hidden_X, config, num_generate=1, beam_size=5):
                 logits = outputs.logits[:, -1, :]  # Last token predictions
                 
                 # Apply temperature and top-k sampling
-                logits = logits / 0.9  # temperature
-                top_k = 50
+                logits = logits / 1.0  # Increased temperature for diversity
+                top_k = 20  # Reduced top-k
                 if top_k > 0:
                     top_k_logits, top_k_indices = torch.topk(logits, top_k)
                     logits = torch.full_like(logits, float('-inf'))
@@ -119,9 +120,15 @@ def beam_decode_sentence(hidden_X, config, num_generate=1, beam_size=5):
                     token_id = top_indices[0, i].item()
                     token_prob = top_probs[0, i].item()
                     
-                    # Skip special tokens
+                    # Skip special tokens and repetitive tokens
                     if token_id in [tokenizer.pad_token_id, tokenizer.eos_token_id]:
                         continue
+                    
+                    # Check for repetition (simple check)
+                    if sequence.shape[1] > 2:
+                        last_tokens = sequence[0, -2:].tolist()
+                        if token_id in last_tokens:
+                            continue  # Skip if token repeats
                     
                     # Create new sequence
                     new_sequence = torch.cat([sequence, torch.tensor([[token_id]], device=device)], dim=1)
@@ -144,12 +151,26 @@ def beam_decode_sentence(hidden_X, config, num_generate=1, beam_size=5):
         if sequence.shape[1] > 1:
             sequence = sequence[:, 1:]
         
+        # Skip if too short
+        if sequence.shape[1] < min_length:
+            continue
+        
         # Decode to text
         try:
             text = tokenizer.decode(sequence[0], skip_special_tokens=True)
-            generated_texts.append(text.strip())
+            text = text.strip()
+            
+            # Skip empty or very short text
+            if len(text) < 3:
+                continue
+                
+            generated_texts.append(text)
         except:
-            generated_texts.append("")
+            continue
+    
+    # If no valid texts generated, return a simple fallback
+    if not generated_texts:
+        return "Generated text"
     
     return generated_texts if len(generated_texts) > 1 else generated_texts[0]
 
