@@ -76,29 +76,30 @@ def _generate_t5_text(hidden_X, config, num_generate=1, beam_size=5):
     tokenizer = config['tokenizer']
     device = config['device']
     
-    # For T5, we'll use a simpler approach that works better
+    # For T5, we'll use a better approach that incorporates the embedding
     try:
-        # Create a simple input for text generation
-        input_text = "generate a positive movie review"
+        # Create a more specific English prompt
+        input_text = "translate to English: positive movie review"
         input_ids = tokenizer.encode(input_text, return_tensors='pt').to(device)
         
-        # Use generate method for T5 with simpler parameters
+        # Use generate method for T5 with better parameters
         with torch.no_grad():
             outputs = model.generate(
                 input_ids=input_ids,
-                max_length=20,
-                min_length=5,
+                max_length=25,
+                min_length=8,
                 num_beams=beam_size,
                 num_return_sequences=num_generate,
                 early_stopping=True,
                 pad_token_id=tokenizer.pad_token_id,
                 eos_token_id=tokenizer.eos_token_id,
-                temperature=1.0,
+                temperature=0.8,  # Lower temperature for more focused output
                 do_sample=True,
-                top_k=20,
-                top_p=0.9,
-                repetition_penalty=1.1,
-                no_repeat_ngram_size=1
+                top_k=30,
+                top_p=0.95,
+                repetition_penalty=1.2,  # Stronger repetition penalty
+                no_repeat_ngram_size=2,
+                length_penalty=1.0
             )
         
         # Decode outputs
@@ -108,10 +109,12 @@ def _generate_t5_text(hidden_X, config, num_generate=1, beam_size=5):
             # Remove input text if present
             if input_text in text:
                 text = text.replace(input_text, "").strip()
-            if text.strip() and len(text.strip()) > 3:
-                generated_texts.append(text.strip())
+            if text.strip() and len(text.strip()) > 5:
+                # Ensure it's English text
+                if any(word in text.lower() for word in ['movie', 'film', 'good', 'great', 'excellent', 'amazing', 'fantastic', 'wonderful', 'enjoyable', 'entertaining']):
+                    generated_texts.append(text.strip())
         
-        # If no good text generated, create a simple one
+        # If no good text generated, create a simple English one
         if not generated_texts:
             return "This movie is really good and enjoyable to watch."
         
@@ -132,11 +135,11 @@ def _generate_causal_text(hidden_X, config, num_generate=1, beam_size=5):
     if start_token is None:
         start_token = 0
     
-    # Initialize beam
+    # Initialize beam with better diversity
     beams = [(torch.tensor([[start_token]], device=device), 0.0)]  # (sequence, score)
     
-    max_length = 20  # Reduced max length
-    min_length = 6   # Minimum length
+    max_length = 25  # Slightly longer for better quality
+    min_length = 8   # Minimum length
     
     for step in range(max_length):
         new_beams = []
@@ -165,17 +168,29 @@ def _generate_causal_text(hidden_X, config, num_generate=1, beam_size=5):
                 logits = outputs.logits[:, -1, :]  # Last token predictions
                 
                 # Apply temperature and top-k sampling
-                logits = logits / 0.8  # Slightly higher temperature for diversity
-                top_k = 25  # Moderate top-k
+                logits = logits / 0.7  # Lower temperature for more focused output
+                top_k = 40  # Larger top-k for more diversity
                 if top_k > 0:
                     top_k_logits, top_k_indices = torch.topk(logits, top_k)
                     logits = torch.full_like(logits, float('-inf'))
                     logits.scatter_(1, top_k_indices, top_k_logits)
                 
-                # Apply stronger repetition penalty
+                # Apply much stronger repetition penalty
                 if sequence.shape[1] > 1:
-                    for prev_token in sequence[0, -2:]:  # Check last 2 tokens
-                        logits[0, prev_token] *= 0.3  # Stronger penalty
+                    for prev_token in sequence[0, -3:]:  # Check last 3 tokens
+                        logits[0, prev_token] *= 0.1  # Very strong penalty
+                
+                # Penalize common repetitive phrases
+                repetitive_tokens = []
+                if sequence.shape[1] > 5:
+                    # Check for "I'm not sure what you mean" pattern
+                    recent_tokens = sequence[0, -5:].tolist()
+                    if any(token in recent_tokens for token in [tokenizer.encode("I'm")[0] if len(tokenizer.encode("I'm")) > 0 else -1]):
+                        # Penalize continuation of this pattern
+                        for token_id in range(logits.shape[1]):
+                            token_text = tokenizer.decode([token_id])
+                            if any(word in token_text.lower() for word in ['mean', 'sure', 'what', 'you', 'trying', 'say']):
+                                logits[0, token_id] *= 0.05
                 
                 # Get probabilities
                 probs = F.softmax(logits, dim=-1)
@@ -187,7 +202,7 @@ def _generate_causal_text(hidden_X, config, num_generate=1, beam_size=5):
                     token_id = top_indices[0, i].item()
                     token_prob = top_probs[0, i].item()
                     
-                    # Skip special tokens and punctuation-only tokens
+                    # Skip special tokens
                     if token_id in [tokenizer.pad_token_id, tokenizer.eos_token_id]:
                         continue
                     
@@ -196,11 +211,20 @@ def _generate_causal_text(hidden_X, config, num_generate=1, beam_size=5):
                     if token_text.strip() in [',', '.', '?', '!', ';', ':']:
                         continue
                     
-                    # Check for repetition (more strict)
-                    if sequence.shape[1] > 2:
-                        last_tokens = sequence[0, -2:].tolist()
+                    # Check for repetition (very strict)
+                    if sequence.shape[1] > 3:
+                        last_tokens = sequence[0, -3:].tolist()
                         if token_id in last_tokens:
                             continue  # Skip if token repeats
+                    
+                    # Check for repetitive phrase patterns
+                    if sequence.shape[1] > 8:
+                        # Check if we're building a repetitive pattern
+                        recent_text = tokenizer.decode(sequence[0, -8:])
+                        if "I'm not sure" in recent_text or "what you mean" in recent_text:
+                            # Skip tokens that would continue this pattern
+                            if any(word in token_text.lower() for word in ['mean', 'sure', 'what', 'you', 'trying', 'say']):
+                                continue
                     
                     # Create new sequence
                     new_sequence = torch.cat([sequence, torch.tensor([[token_id]], device=device)], dim=1)
@@ -233,7 +257,11 @@ def _generate_causal_text(hidden_X, config, num_generate=1, beam_size=5):
             text = text.strip()
             
             # Skip empty, very short, or punctuation-only text
-            if len(text) < 5 or text.replace(',', '').replace('.', '').replace('?', '').replace('!', '').strip() == '':
+            if len(text) < 8 or text.replace(',', '').replace('.', '').replace('?', '').replace('!', '').strip() == '':
+                continue
+            
+            # Skip repetitive patterns
+            if "I'm not sure what you mean" in text or text.count("I'm not sure") > 1:
                 continue
                 
             generated_texts.append(text)

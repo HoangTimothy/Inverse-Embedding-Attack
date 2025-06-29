@@ -233,19 +233,49 @@ def train_on_batch(batch_X,batch_D,model,tokenizer,criterion,device,train=True):
     input_ids = inputs['input_ids'].to(device) # tensors of input ids
     labels = input_ids.clone()
     #print(input_ids.size())
-    # embed the input ids using GPT-2 embedding
-    input_emb = model.transformer.wte(input_ids)
+    
+    # Handle different model types for embedding
+    if hasattr(model, 'transformer') and hasattr(model.transformer, 'wte'):
+        # GPT-2 style model
+        input_emb = model.transformer.wte(input_ids)
+    elif hasattr(model, 'model') and hasattr(model.model, 'decoder') and hasattr(model.model.decoder, 'embed_tokens'):
+        # OPT style model
+        input_emb = model.model.decoder.embed_tokens(input_ids)
+    elif hasattr(model, 'shared'):
+        # T5 style model - for T5 we need a different approach
+        input_emb = model.shared(input_ids)
+    else:
+        # Fallback - try to find embedding layer
+        if hasattr(model, 'get_input_embeddings'):
+            input_emb = model.get_input_embeddings()(input_ids)
+        else:
+            raise ValueError(f"Unknown model type: {type(model)}")
+    
     # add extra dim to cat together
     batch_X = batch_X.to(device)
     batch_X_unsqueeze = torch.unsqueeze(batch_X, 1)
-    inputs_embeds = torch.cat((batch_X_unsqueeze,input_emb),dim=1)   #[batch,max_length+1,emb_dim (1024)]
+    inputs_embeds = torch.cat((batch_X_unsqueeze,input_emb),dim=1)   #[batch,max_length+1,emb_dim]
     past = None
     # need to move to device later
     inputs_embeds = inputs_embeds
 
-    #logits, past = model(inputs_embeds=inputs_embeds,past = past)
-    logits, past = model(inputs_embeds=inputs_embeds,past_key_values  = past,return_dict=False)
-    logits = logits[:, :-1].contiguous()
+    # Forward pass - handle different model types
+    if hasattr(model, 'shared'):
+        # T5 model - use encoder-decoder approach
+        # For T5, we'll use a simpler approach since it's seq2seq
+        encoder_outputs = model.encoder(inputs_embeds=inputs_embeds, return_dict=True)
+        decoder_input_ids = input_ids[:, :-1]  # Remove last token for decoder input
+        decoder_outputs = model.decoder(
+            input_ids=decoder_input_ids,
+            encoder_hidden_states=encoder_outputs.last_hidden_state,
+            return_dict=True
+        )
+        logits = decoder_outputs.logits
+    else:
+        # Causal LM (GPT-2, OPT)
+        logits, past = model(inputs_embeds=inputs_embeds,past_key_values=past,return_dict=False)
+        logits = logits[:, :-1].contiguous()
+    
     target = labels.contiguous()
     target_mask = torch.ones_like(target).float()
     loss = criterion(logits, target, target_mask, label_smoothing=0.02, reduce="batch")   
