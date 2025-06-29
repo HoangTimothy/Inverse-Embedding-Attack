@@ -9,6 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from queue import PriorityQueue
 import sys
+from typing import List, Dict, Any
 
 
 class BeamSearchNode(object):
@@ -41,120 +42,116 @@ class BeamSearchNode(object):
 
 
 
-def beam_decode_sentence(hidden_X, config,num_generate=1, beam_size = 5, batch_size = 1):
-    '''
-    generate a sentence based on beam search
-    :param hidden_X: hidden_X of sentence embedding  (1024) with/without projection
-    :param model: GPT-2 model
-    :param tokenizer: GPT-2 tokenizer
-    :return: decoded_batch
-    '''
-    #SOS_token = tokenizer.encode("<|endoftext|>")
-    beam_width = beam_size
-    topk = num_generate  # how many sentence do you want to generate
-
-    past = None
+def beam_decode_sentence(hidden_X, config, num_generate=1, beam_size=5):
+    """
+    Simple beam search implementation for text generation
+    
+    Args:
+        hidden_X: Input embedding tensor
+        config: Configuration dictionary with model, tokenizer, device
+        num_generate: Number of sequences to generate
+        beam_size: Beam size for search
+    
+    Returns:
+        List of generated text sequences
+    """
     model = config['model']
-    tokenizer =config['tokenizer']
-    eos = [tokenizer.encode(tokenizer.eos_token)]
-    EOS_token = eos
-    hidden_X_unsqueeze = torch.unsqueeze(hidden_X, 0)
-    hidden_X_unsqueeze = torch.unsqueeze(hidden_X_unsqueeze, 0)  #[1,1,embed_dim]
-
-    decoded_batch = []
-
-    # decoding goes sentence by sentence
-    for idx in range(batch_size):
-
-        # Number of sentence to generate
-        endnodes = []
-        number_required = min((topk + 1), topk - len(endnodes))
-
-        # starting node -  hidden vector, previous node, word id, logp, length              hiddenstate, previousNode, wordId, logProb, length
-        node = BeamSearchNode(past, None, torch.tensor([[220]]).cuda(), 0, 1)                    # 220 refers to single space ' ' on GPT
-        nodes = PriorityQueue()
-
-        # start the queue
-        nodes.put((-node.eval(), node))
-        qsize = 1
-
-        # start beam search
-        for text_len in range(50):
-            # give up when decoding takes too long
-            if qsize > 2000: break
-
-            # fetch the best node
-            try:
-                score, n = nodes.get()
-            except:
-                print('Cannot get nodes')
-                while not nodes.empty():
-                    next_item = nodes.get()
-                    print(next_item)
-            prev_input = n.wordid
-            past = n.h
-
-            if n.wordid.item() == EOS_token[0] and n.prevNode != None:
-                endnodes.append((score, n))
-                # if we reached maximum # of sentences required
-                if len(endnodes) >= number_required:
-                    break                    
-                else:
-                    print('continue')
-                    continue
-            # decode for one step using decoder
-            if(text_len == 0):
-                logits, past = model(inputs_embeds=hidden_X_unsqueeze,past_key_values  = past,return_dict=False)
-                
-            else:
-                logits, past = model(prev_input,past_key_values = past, attention_mask=None, return_dict=False)
-            logits = logits[:, -1, :]
-            probs = torch.softmax(logits, dim=-1) 
-            # PUT HERE REAL BEAM SEARCH OF TOP
-            log_prob, indexes = torch.topk(probs, beam_width)
-            nextnodes = []
+    tokenizer = config['tokenizer']
+    device = config['device']
+    
+    # Move embedding to device
+    hidden_X = hidden_X.to(device)
+    
+    # Initialize with start token
+    start_token = tokenizer.eos_token_id if tokenizer.eos_token_id else tokenizer.pad_token_id
+    if start_token is None:
+        start_token = 0
+    
+    # Initialize beam
+    beams = [(torch.tensor([[start_token]], device=device), 0.0)]  # (sequence, score)
+    
+    max_length = 50  # Maximum sequence length
+    
+    for step in range(max_length):
+        new_beams = []
+        
+        for sequence, score in beams:
+            if sequence.shape[1] >= max_length:
+                new_beams.append((sequence, score))
+                continue
             
-            for new_k in range(beam_width):
-                decoded_t = indexes[0][new_k].view(1, -1)
-                log_p = log_prob[0][new_k].item()
-                #### hiddenstate, previousNode, wordId, logProb, length
-                node = BeamSearchNode(past, n, decoded_t, n.logp + log_p, n.leng + 1)
-                score = -node.eval()
-                nextnodes.append((score, node))
-
-            # put them into queue
-            for i in range(len(nextnodes)):
-                score, nn = nextnodes[i]
-                try:
-                    nodes.put((score, nn))
-                except:
-                    print('Cannot put nodes')
-                    print(score)
-                    print(nn)
-                # increase qsize
-            qsize += len(nextnodes) - 1
-        # for loop ends here
-        # choose nbest paths, back trace them
-        if len(endnodes) == 0:
-            endnodes = [nodes.get() for _ in range(topk)]
-
-        utterances = []
-        text = []
-        for score, n in sorted(endnodes, key=operator.itemgetter(0)):
-            utterance = []
-            utterance.append(n.wordid.item())
-            # back trace
-            while n.prevNode != None:
-                n = n.prevNode
-                utterance.append(n.wordid.item())
-
-            utterance = utterance[::-1]
-            utterances.append(utterance)
-            decode_process = tokenizer.decode(utterance[1:-1])
-            text.append(decode_process)
-        decoded_batch.append(utterances)
-
-    return text
+            # Prepare input
+            if hasattr(model, 'transformer'):
+                # GPT-2 style
+                input_emb = model.transformer.wte(sequence)
+            elif hasattr(model, 'model'):
+                # OPT style
+                input_emb = model.model.decoder.embed_tokens(sequence)
+            else:
+                # T5 style
+                input_emb = model.shared(sequence)
+            
+            # Concatenate with hidden_X if provided
+            if hidden_X is not None:
+                hidden_X_unsqueeze = hidden_X.unsqueeze(0).unsqueeze(0)
+                input_emb = torch.cat((hidden_X_unsqueeze, input_emb), dim=1)
+            
+            # Forward pass
+            with torch.no_grad():
+                outputs = model(inputs_embeds=input_emb, return_dict=True)
+                logits = outputs.logits[:, -1, :]  # Last token predictions
+                
+                # Apply temperature and top-k sampling
+                logits = logits / 0.9  # temperature
+                top_k = 50
+                if top_k > 0:
+                    top_k_logits, top_k_indices = torch.topk(logits, top_k)
+                    logits = torch.full_like(logits, float('-inf'))
+                    logits.scatter_(1, top_k_indices, top_k_logits)
+                
+                # Get probabilities
+                probs = F.softmax(logits, dim=-1)
+                
+                # Sample top beam_size tokens
+                top_probs, top_indices = torch.topk(probs, beam_size, dim=-1)
+                
+                for i in range(beam_size):
+                    token_id = top_indices[0, i].item()
+                    token_prob = top_probs[0, i].item()
+                    
+                    # Skip special tokens
+                    if token_id in [tokenizer.pad_token_id, tokenizer.eos_token_id]:
+                        continue
+                    
+                    # Create new sequence
+                    new_sequence = torch.cat([sequence, torch.tensor([[token_id]], device=device)], dim=1)
+                    new_score = score + torch.log(torch.tensor(token_prob))
+                    
+                    new_beams.append((new_sequence, new_score.item()))
+        
+        # Keep top beam_size beams
+        new_beams.sort(key=lambda x: x[1], reverse=True)
+        beams = new_beams[:beam_size]
+        
+        # Check if all beams are complete
+        if all(seq.shape[1] >= max_length for seq, _ in beams):
+            break
+    
+    # Decode sequences
+    generated_texts = []
+    for sequence, score in beams[:num_generate]:
+        # Remove start token
+        if sequence.shape[1] > 1:
+            sequence = sequence[:, 1:]
+        
+        # Decode to text
+        try:
+            text = tokenizer.decode(sequence[0], skip_special_tokens=True)
+            generated_texts.append(text.strip())
+        except:
+            generated_texts.append("")
+    
+    return generated_texts if len(generated_texts) > 1 else generated_texts[0]
 
 
 def greedy_decode(decoder_hidden, encoder_outputs, target_tensor):

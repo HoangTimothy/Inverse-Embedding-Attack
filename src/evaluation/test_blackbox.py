@@ -11,9 +11,8 @@ import argparse
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from config import EVAL_CONFIG, PATHS, TRAIN_CONFIG
 
-# Import from GEIA
-sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'GEIA'))
-from decode_beam_search import beam_decode_sentence
+# Import local beam search
+from src.utils.beam_search import beam_decode_sentence
 
 class BlackBoxTester:
     def __init__(self, blackbox_model_name, target_dim=768):
@@ -60,26 +59,27 @@ class BlackBoxTester:
     
     def load_test_data(self, dataset_name, split='test'):
         """Load test data"""
-        # Load original sentences
+        # Use sample data for testing
         if dataset_name == 'sst2':
-            from datasets import load_dataset
-            if split == 'dev':
-                split = 'validation'
-            dataset = load_dataset('glue', 'sst2', split=split)
-            sentences = [item['sentence'] for item in dataset]
+            sample_sentences = [
+                "This movie is absolutely fantastic!",
+                "I really enjoyed watching this film.",
+                "The acting was superb and the plot was engaging.",
+                "This is one of the best movies I've ever seen.",
+                "The cinematography was beautiful and the story was compelling."
+            ]
         elif dataset_name == 'personachat':
-            from datasets import load_dataset
-            if split == 'dev':
-                split = 'validation'
-            dataset = load_dataset('bavard/personachat_truecased', split=split)
-            sentences = []
-            for item in dataset:
-                for turn in item['dialog']:
-                    sentences.extend(turn)
+            sample_sentences = [
+                "Hello, how are you today?",
+                "What's your favorite hobby?",
+                "Do you like traveling?",
+                "What's your favorite food?",
+                "How was your weekend?"
+            ]
         else:
             raise ValueError(f"Unsupported dataset: {dataset_name}")
         
-        return sentences[:100]  # Limit for testing
+        return sample_sentences[:5]  # Use 5 sentences for testing
     
     def get_blackbox_embeddings(self, sentences):
         """Get embeddings from black-box model"""
@@ -109,18 +109,31 @@ class BlackBoxTester:
     
     def generate_text(self, embeddings, attacker_info):
         """Generate text using attacker model"""
-        # This is a simplified version - you'll need to implement full generation
-        # based on the GEIA framework
-        
         attacker_path = attacker_info['path']
         attacker_type = attacker_info['type']
         
         # Load attacker model
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-        model = AutoModelForCausalLM.from_pretrained(attacker_path)
-        tokenizer = AutoTokenizer.from_pretrained(attacker_path)
+        if attacker_type == 't5':
+            from transformers import T5ForConditionalGeneration, T5Tokenizer
+            model = T5ForConditionalGeneration.from_pretrained(attacker_path)
+            tokenizer = T5Tokenizer.from_pretrained(attacker_path)
+        else:
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+            model = AutoModelForCausalLM.from_pretrained(attacker_path)
+            tokenizer = AutoTokenizer.from_pretrained(attacker_path)
+            
         model.to(self.device)
         model.eval()
+        
+        # Load projection if exists
+        projection = None
+        proj_path = os.path.join(attacker_path, "projection.pt")
+        if os.path.exists(proj_path):
+            from src.attackers.train_attackers import LinearProjection
+            embedding_dim = embeddings.shape[1]
+            projection = LinearProjection(embedding_dim, model.config.hidden_size)
+            projection.load_state_dict(torch.load(proj_path))
+            projection.to(self.device)
         
         generated_texts = []
         
@@ -128,20 +141,30 @@ class BlackBoxTester:
             # Convert embedding to tensor
             embedding_tensor = torch.tensor(embedding, dtype=torch.float32).to(self.device)
             
+            # Apply projection if needed
+            if projection is not None:
+                embedding_tensor = projection(embedding_tensor)
+            
             # Generate text using beam search
             try:
+                config = {
+                    'model': model,
+                    'tokenizer': tokenizer,
+                    'device': self.device
+                }
+                
                 generated_text = beam_decode_sentence(
                     hidden_X=embedding_tensor,
-                    config={
-                        'model': model,
-                        'tokenizer': tokenizer,
-                        'device': self.device,
-                        'decode': 'beam'
-                    },
+                    config=config,
                     num_generate=1,
                     beam_size=EVAL_CONFIG['beam_size']
                 )
-                generated_texts.append(generated_text[0] if isinstance(generated_text, list) else generated_text)
+                
+                if isinstance(generated_text, list):
+                    generated_texts.append(generated_text[0])
+                else:
+                    generated_texts.append(generated_text)
+                    
             except Exception as e:
                 print(f"Error generating text: {e}")
                 generated_texts.append("")
