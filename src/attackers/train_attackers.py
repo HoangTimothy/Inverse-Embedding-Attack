@@ -7,15 +7,16 @@ import torch.nn.functional as F
 import numpy as np
 from tqdm import tqdm
 from torch.utils.data import DataLoader, Dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer, AdamW, get_linear_schedule_with_warmup
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from torch.optim import AdamW
+from torch.optim.lr_scheduler import get_linear_schedule_with_warmup
 import argparse
 
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from config import ATTACKER_MODELS, TRAIN_CONFIG, PATHS, EVAL_CONFIG
 
-# Import from GEIA
-sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'GEIA'))
+# Import from local files
 from attacker_models import SequenceCrossEntropyLoss
 from decode_beam_search import beam_decode_sentence
 
