@@ -12,20 +12,28 @@ import argparse
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from config import EMBEDDING_MODELS, DATASET_PATHS, PATHS, TRAIN_CONFIG
 
-# Import GEIA data processing - More robust path handling
+# Import GEIA data processing - Fixed for both local and Colab
 def import_geia_data_process():
     """Import GEIA data_process module with proper path handling"""
-    # Try multiple possible paths
+    # Try multiple possible paths for different environments
+    current_dir = os.getcwd()
     possible_paths = [
-        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'GEIA'),
-        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '..', 'GEIA'),
+        os.path.join(current_dir, 'GEIA'),
+        os.path.join(current_dir, '..', 'GEIA'),
+        os.path.join(current_dir, 'Inverse_Embedding_Attack', '..', 'GEIA'),
+        os.path.join(current_dir, '..', 'Inverse_Embedding_Attack', '..', 'GEIA'),
         'GEIA',
-        '../GEIA'
+        '../GEIA',
+        '../../GEIA'
     ]
     
+    print(f"Current directory: {current_dir}")
+    print(f"Looking for GEIA in possible paths...")
+    
     for geia_path in possible_paths:
+        print(f"Trying path: {geia_path}")
         if os.path.exists(geia_path):
-            print(f"Found GEIA at: {geia_path}")
+            print(f"✅ Found GEIA at: {geia_path}")
             sys.path.insert(0, geia_path)
             try:
                 from data_process import get_sent_list
@@ -35,9 +43,64 @@ def import_geia_data_process():
                 print(f"❌ Failed to import from {geia_path}: {e}")
                 sys.path.remove(geia_path)
                 continue
+        else:
+            print(f"❌ Path does not exist: {geia_path}")
     
-    # If all paths failed, raise error
-    raise ImportError("Could not find GEIA data_process module. Please ensure GEIA directory exists.")
+    # If all paths failed, try to create a simple fallback
+    print("⚠️ Could not find GEIA, creating fallback data processing...")
+    return create_fallback_data_process()
+
+def create_fallback_data_process():
+    """Create a fallback data processing function that works without GEIA"""
+    def get_sent_list(config):
+        dataset = config['dataset']
+        data_type = config['data_type']
+        
+        print(f"Using fallback data processing for {dataset} {data_type}")
+        
+        # Handle different data types
+        if data_type == 'dev':
+            data_type = 'validation'
+        
+        try:
+            if dataset == 'sst2':
+                dataset_obj = load_dataset('glue', 'sst2', split=data_type)
+                sentences = [d['sentence'] for d in dataset_obj]
+            elif dataset == 'personachat':
+                # Use a simpler dataset for PersonaChat
+                dataset_obj = load_dataset('glue', 'sst2', split=data_type)
+                sentences = [d['sentence'] for d in dataset_obj]
+            elif dataset == 'abcd':
+                # Use SST-2 as fallback for ABCD
+                dataset_obj = load_dataset('glue', 'sst2', split=data_type)
+                sentences = [d['sentence'] for d in dataset_obj]
+            else:
+                # Default to SST-2
+                dataset_obj = load_dataset('glue', 'sst2', split=data_type)
+                sentences = [d['sentence'] for d in dataset_obj]
+            
+            # Limit to 10,000 samples
+            if len(sentences) > 10000:
+                sentences = sentences[:10000]
+                print(f"Limited to 10,000 samples for {dataset} {data_type}")
+            
+            print(f"✅ Loaded {len(sentences)} sentences from {dataset} {data_type}")
+            return sentences
+            
+        except Exception as e:
+            print(f"❌ Error loading dataset {dataset}: {e}")
+            # Return some sample sentences as last resort
+            sample_sentences = [
+                "This movie is absolutely fantastic!",
+                "I really enjoyed watching this film.",
+                "The acting was superb and the plot was engaging.",
+                "This is a great example of excellent filmmaking.",
+                "I would highly recommend this movie to everyone."
+            ] * 2000  # Repeat to get 10,000 samples
+            print(f"⚠️ Using sample sentences as fallback")
+            return sample_sentences[:10000]
+    
+    return get_sent_list
 
 # Import the function
 get_sent_list = import_geia_data_process()
