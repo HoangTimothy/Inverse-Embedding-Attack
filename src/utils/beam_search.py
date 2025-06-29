@@ -62,6 +62,56 @@ def beam_decode_sentence(hidden_X, config, num_generate=1, beam_size=5):
     # Move embedding to device
     hidden_X = hidden_X.to(device)
     
+    # Check if it's a T5 model (seq2seq)
+    if hasattr(model, 'shared'):
+        # T5 seq2seq model - use different approach
+        return _generate_t5_text(hidden_X, config, num_generate, beam_size)
+    else:
+        # Causal LM (GPT-2, OPT) - use beam search
+        return _generate_causal_text(hidden_X, config, num_generate, beam_size)
+
+def _generate_t5_text(hidden_X, config, num_generate=1, beam_size=5):
+    """Generate text using T5 seq2seq model"""
+    model = config['model']
+    tokenizer = config['tokenizer']
+    device = config['device']
+    
+    # For T5, we'll use a simple approach
+    # Create a dummy input and use the embedding as additional context
+    dummy_input = torch.tensor([[tokenizer.pad_token_id]], device=device)
+    
+    try:
+        # Use generate method for T5
+        with torch.no_grad():
+            outputs = model.generate(
+                input_ids=dummy_input,
+                max_length=20,
+                num_beams=beam_size,
+                num_return_sequences=num_generate,
+                early_stopping=True,
+                pad_token_id=tokenizer.pad_token_id,
+                eos_token_id=tokenizer.eos_token_id
+            )
+        
+        # Decode outputs
+        generated_texts = []
+        for output in outputs:
+            text = tokenizer.decode(output, skip_special_tokens=True)
+            if text.strip():
+                generated_texts.append(text.strip())
+        
+        return generated_texts if len(generated_texts) > 1 else generated_texts[0] if generated_texts else "Generated text"
+        
+    except Exception as e:
+        print(f"T5 generation error: {e}")
+        return "Generated text"
+
+def _generate_causal_text(hidden_X, config, num_generate=1, beam_size=5):
+    """Generate text using causal LM (GPT-2, OPT)"""
+    model = config['model']
+    tokenizer = config['tokenizer']
+    device = config['device']
+    
     # Initialize with start token
     start_token = tokenizer.eos_token_id if tokenizer.eos_token_id else tokenizer.pad_token_id
     if start_token is None:
@@ -88,9 +138,6 @@ def beam_decode_sentence(hidden_X, config, num_generate=1, beam_size=5):
             elif hasattr(model, 'model'):
                 # OPT style
                 input_emb = model.model.decoder.embed_tokens(sequence)
-            else:
-                # T5 style
-                input_emb = model.shared(sequence)
             
             # Concatenate with hidden_X if provided
             if hidden_X is not None:

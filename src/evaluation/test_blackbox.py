@@ -9,7 +9,7 @@ import argparse
 
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-from config import EVAL_CONFIG, PATHS, TRAIN_CONFIG
+from config import EVAL_CONFIG, PATHS, TRAIN_CONFIG, EMBEDDING_MODELS
 
 # Import local beam search
 from src.utils.beam_search import beam_decode_sentence
@@ -138,7 +138,10 @@ class BlackBoxTester:
                 def forward(self, x):
                     return self.fc(x)
             
-            embedding_dim = embeddings.shape[1]
+            # Get the correct input dimension from attacker info
+            embedding_model = attacker_info['embedding_model']
+            embedding_dim = EMBEDDING_MODELS[embedding_model]['dim']
+            
             projection = LinearProjection(embedding_dim, model.config.hidden_size)
             projection.load_state_dict(torch.load(proj_path))
             projection.to(self.device)
