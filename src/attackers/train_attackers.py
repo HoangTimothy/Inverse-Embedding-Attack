@@ -78,8 +78,17 @@ class InverseEmbeddingAttacker:
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)
         
         # Debug: print model info
+        print(f"Model type: {type(self.model).__name__}")
         print(f"Model hidden size: {self.model.config.hidden_size}")
         print(f"Model vocab size: {self.model.config.vocab_size}")
+        
+        # Check model structure
+        if hasattr(self.model, 'transformer'):
+            print("Model has 'transformer' attribute (GPT-2 style)")
+        elif hasattr(self.model, 'model'):
+            print("Model has 'model' attribute (OPT style)")
+        else:
+            print("Model has different structure (T5 style)")
         
         # Set pad token
         if self.tokenizer.pad_token is None:
@@ -108,9 +117,6 @@ class InverseEmbeddingAttacker:
         # Move embeddings to device first
         batch_embeddings = batch_embeddings.to(self.device)
         
-        # Debug: print dimensions
-        print(f"Input embeddings shape: {batch_embeddings.shape}")
-        
         # Tokenize sentences
         inputs = self.tokenizer(
             batch_sentences, 
@@ -123,20 +129,23 @@ class InverseEmbeddingAttacker:
         input_ids = inputs['input_ids'].to(self.device)
         labels = input_ids.clone()
         
-        # Get embeddings from attacker model
-        input_emb = self.model.transformer.wte(input_ids)
-        print(f"Model input embeddings shape: {input_emb.shape}")
+        # Get embeddings from attacker model (handle different model types)
+        if hasattr(self.model, 'transformer'):
+            # GPT-2 style models
+            input_emb = self.model.transformer.wte(input_ids)
+        elif hasattr(self.model, 'model'):
+            # OPT style models
+            input_emb = self.model.model.decoder.embed_tokens(input_ids)
+        else:
+            # T5 style models
+            input_emb = self.model.shared(input_ids)
         
         # Apply projection if needed
         if self.projection is not None:
             batch_embeddings = self.projection(batch_embeddings)
-            print(f"Projected embeddings shape: {batch_embeddings.shape}")
         
         # Concatenate embeddings with input embeddings
         batch_embeddings_unsqueeze = torch.unsqueeze(batch_embeddings, 1)
-        print(f"Unsqueezed embeddings shape: {batch_embeddings_unsqueeze.shape}")
-        print(f"Input embeddings shape: {input_emb.shape}")
-        
         inputs_embeds = torch.cat((batch_embeddings_unsqueeze, input_emb), dim=1)
         
         # Forward pass
