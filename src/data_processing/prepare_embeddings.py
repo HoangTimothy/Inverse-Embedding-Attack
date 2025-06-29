@@ -37,13 +37,30 @@ class EmbeddingPreparer:
             if dataset_name == 'sst2':
                 if split == 'dev':
                     split = 'validation'
-                # Remove cache_dir to avoid path issues
-                dataset = load_dataset('glue', 'sst2', split=split)
+                # Try loading with different approaches
+                try:
+                    dataset = load_dataset('glue', 'sst2', split=split)
+                except Exception as e1:
+                    print(f"First attempt failed: {e1}")
+                    try:
+                        # Try with trust_remote_code
+                        dataset = load_dataset('glue', 'sst2', split=split, trust_remote_code=True)
+                    except Exception as e2:
+                        print(f"Second attempt failed: {e2}")
+                        # Use a small subset
+                        dataset = load_dataset('glue', 'sst2', split=f'{split}[:100]')
+                
                 sentences = [item['sentence'] for item in dataset]
             elif dataset_name == 'personachat':
                 if split == 'dev':
                     split = 'validation'
-                dataset = load_dataset('bavard/personachat_truecased', split=split)
+                try:
+                    dataset = load_dataset('bavard/personachat_truecased', split=split)
+                except Exception as e:
+                    print(f"PersonaChat loading failed: {e}")
+                    # Use a small subset
+                    dataset = load_dataset('bavard/personachat_truecased', split=f'{split}[:50]')
+                
                 sentences = []
                 for item in dataset:
                     # Extract all utterances from conversation

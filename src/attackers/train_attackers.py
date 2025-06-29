@@ -7,9 +7,8 @@ import torch.nn.functional as F
 import numpy as np
 from tqdm import tqdm
 from torch.utils.data import DataLoader, Dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, get_linear_schedule_with_warmup
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import get_linear_schedule_with_warmup
 import argparse
 
 # Add parent directory to path
