@@ -11,20 +11,18 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, get_linear_schedul
 from torch.optim import AdamW
 import argparse
 
-# Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from config import ATTACKER_MODELS, TRAIN_CONFIG, PATHS, EVAL_CONFIG
 
-# Import from local files - Fix the paths
 current_dir = os.path.dirname(__file__)
 sys.path.insert(0, current_dir)
 
 try:
     from attacker_models import SequenceCrossEntropyLoss
     from decode_beam_search import beam_decode_sentence
-    print("✅ Successfully imported local modules")
+    print("Successfully imported local modules")
 except ImportError as e:
-    print(f"❌ Error importing local modules: {e}")
+    print(f"Error importing local modules: {e}")
     print(f"Current directory: {current_dir}")
     print(f"Files in directory: {os.listdir(current_dir)}")
     raise
@@ -59,13 +57,10 @@ class InverseEmbeddingAttacker:
         self.embedding_model_name = embedding_model_name
         self.embedding_dim = embedding_dim
         
-        # Load attacker model first
         self.load_attacker_model()
         
-        # Get the correct embedding dimension for the attacker model
-        target_dim = self.model.config.hidden_size  # This will be 1024 for GPT-2
+        target_dim = self.model.config.hidden_size
         
-        # Initialize projection layer if needed
         self.projection = None
         if embedding_dim != target_dim:
             self.projection = LinearProjection(embedding_dim, target_dim)
@@ -73,34 +68,27 @@ class InverseEmbeddingAttacker:
             print(f"Created projection layer: {embedding_dim} -> {target_dim}")
     
     def load_attacker_model(self):
-        """Load attacker model from GEIA framework"""
         model_config = ATTACKER_MODELS[self.attacker_model_name]
         
         print(f"Loading attacker model: {self.attacker_model_name}")
         
-        # Use smaller models for Colab compatibility
         if self.attacker_model_name == 'gpt2':
-            model_path = 'microsoft/DialoGPT-medium'  # Use medium instead of large
+            model_path = 'microsoft/DialoGPT-medium'
         else:
             model_path = model_config['path']
         
-        # Load different model types
         if self.attacker_model_name == 't5':
-            # T5 is a seq2seq model, not causal LM
             from transformers import T5ForConditionalGeneration, T5Tokenizer
             self.model = T5ForConditionalGeneration.from_pretrained(model_path)
             self.tokenizer = T5Tokenizer.from_pretrained(model_path)
         else:
-            # GPT-2 and OPT are causal LMs
             self.model = AutoModelForCausalLM.from_pretrained(model_path)
             self.tokenizer = AutoTokenizer.from_pretrained(model_path)
         
-        # Debug: print model info
         print(f"Model type: {type(self.model).__name__}")
         print(f"Model hidden size: {self.model.config.hidden_size}")
         print(f"Model vocab size: {self.model.config.vocab_size}")
         
-        # Check model structure
         if hasattr(self.model, 'transformer'):
             print("Model has 'transformer' attribute (GPT-2 style)")
         elif hasattr(self.model, 'model'):
@@ -108,7 +96,6 @@ class InverseEmbeddingAttacker:
         else:
             print("Model has different structure (T5 style)")
         
-        # Set pad token
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
         
@@ -116,7 +103,6 @@ class InverseEmbeddingAttacker:
         self.model.train()
     
     def load_embedding_data(self, dataset_name, split='train'):
-        """Load embedding data for training using proper data pipeline"""
         embedding_path = os.path.join(
             PATHS['embeddings_dir'],
             f"{dataset_name}_{split}_{self.embedding_model_name}.json"
@@ -139,11 +125,8 @@ class InverseEmbeddingAttacker:
         return embeddings, sentences
     
     def train_on_batch(self, batch_embeddings, batch_sentences):
-        """Training step for one batch"""
-        # Move embeddings to device first
         batch_embeddings = batch_embeddings.to(self.device)
         
-        # Tokenize sentences
         inputs = self.tokenizer(
             batch_sentences, 
             return_tensors='pt', 
@@ -155,38 +138,27 @@ class InverseEmbeddingAttacker:
         input_ids = inputs['input_ids'].to(self.device)
         labels = input_ids.clone()
         
-        # Handle different model types
         if self.attacker_model_name == 't5':
-            # T5 seq2seq model
             return self._train_t5_batch(batch_embeddings, input_ids, labels)
         else:
-            # GPT-2 and OPT causal models
             return self._train_causal_batch(batch_embeddings, input_ids, labels)
     
     def _train_causal_batch(self, batch_embeddings, input_ids, labels):
-        """Training step for causal models (GPT-2, OPT)"""
-        # Get embeddings from attacker model (handle different model types)
         if hasattr(self.model, 'transformer'):
-            # GPT-2 style models
             input_emb = self.model.transformer.wte(input_ids)
         elif hasattr(self.model, 'model'):
-            # OPT style models
             input_emb = self.model.model.decoder.embed_tokens(input_ids)
         
-        # Apply projection if needed
         if self.projection is not None:
             batch_embeddings = self.projection(batch_embeddings)
         
-        # Concatenate embeddings with input embeddings
         batch_embeddings_unsqueeze = torch.unsqueeze(batch_embeddings, 1)
         inputs_embeds = torch.cat((batch_embeddings_unsqueeze, input_emb), dim=1)
         
-        # Forward pass
         outputs = self.model(inputs_embeds=inputs_embeds, return_dict=True)
         logits = outputs.logits[:, :-1].contiguous()
         target = labels.contiguous()
         
-        # Calculate loss
         criterion = SequenceCrossEntropyLoss()
         target_mask = torch.ones_like(target).float().to(self.device)
         loss = criterion(logits, target, target_mask, label_smoothing=0.02, reduce="batch")
@@ -194,27 +166,19 @@ class InverseEmbeddingAttacker:
         return loss
     
     def _train_t5_batch(self, batch_embeddings, input_ids, labels):
-        """Training step for T5 seq2seq model"""
-        # Apply projection if needed
         if self.projection is not None:
             batch_embeddings = self.projection(batch_embeddings)
         
-        # For T5, we'll use the embeddings as additional input
-        # Create a special input format for T5
         batch_size = batch_embeddings.shape[0]
         
-        # Create a simple forward pass for T5
-        # Note: This is a simplified approach for T5
         outputs = self.model(input_ids=input_ids, labels=labels, return_dict=True)
         loss = outputs.loss
         
         return loss
     
     def train(self, dataset_name, split='train'):
-        """Train the attacker model"""
         print(f"Training attacker {self.attacker_model_name} on {self.embedding_model_name} embeddings...")
         
-        # Load data
         embeddings, sentences = self.load_embedding_data(dataset_name, split)
         dataset = EmbeddingDataset(embeddings, sentences)
         dataloader = DataLoader(
@@ -224,7 +188,6 @@ class InverseEmbeddingAttacker:
             collate_fn=dataset.collate
         )
         
-        # Setup optimizer
         param_optimizer = list(self.model.named_parameters())
         no_decay = ['bias', 'ln', 'LayerNorm.weight']
         optimizer_grouped_parameters = [
@@ -234,11 +197,9 @@ class InverseEmbeddingAttacker:
         
         optimizer = AdamW(optimizer_grouped_parameters, lr=TRAIN_CONFIG['learning_rate'], eps=1e-06)
         
-        # Add projection parameters to optimizer if exists
         if self.projection is not None:
             optimizer.add_param_group({'params': self.projection.parameters()})
         
-        # Setup scheduler
         num_train_steps = len(dataloader) * TRAIN_CONFIG['num_epochs']
         scheduler = get_linear_schedule_with_warmup(
             optimizer, 
@@ -246,7 +207,6 @@ class InverseEmbeddingAttacker:
             num_training_steps=num_train_steps
         )
         
-        # Training loop
         for epoch in range(TRAIN_CONFIG['num_epochs']):
             total_loss = 0
             self.model.train()
@@ -268,22 +228,18 @@ class InverseEmbeddingAttacker:
             avg_loss = total_loss / len(dataloader)
             print(f"Epoch {epoch} completed. Average loss: {avg_loss:.4f}")
             
-            # Save checkpoint
             self.save_model(epoch)
     
     def save_model(self, epoch=None):
-        """Save trained model"""
         model_name = f"attacker_{self.attacker_model_name}_{self.embedding_model_name}"
         if epoch is not None:
             model_name += f"_epoch_{epoch}"
         
         save_path = os.path.join(PATHS['models_dir'], model_name)
         
-        # Save attacker model
         self.model.save_pretrained(save_path)
         self.tokenizer.save_pretrained(save_path)
         
-        # Save projection if exists
         if self.projection is not None:
             proj_path = os.path.join(save_path, "projection.pt")
             torch.save(self.projection.state_dict(), proj_path)
@@ -291,7 +247,6 @@ class InverseEmbeddingAttacker:
         print(f"Model saved to {save_path}")
     
     def load_model(self, model_path):
-        """Load trained model"""
         if self.attacker_model_name == 't5':
             from transformers import T5ForConditionalGeneration, T5Tokenizer
             self.model = T5ForConditionalGeneration.from_pretrained(model_path)
@@ -302,7 +257,6 @@ class InverseEmbeddingAttacker:
             
         self.model.to(self.device)
         
-        # Load projection if exists
         proj_path = os.path.join(model_path, "projection.pt")
         if os.path.exists(proj_path):
             self.projection = LinearProjection(self.embedding_dim, self.model.config.hidden_size)
@@ -328,18 +282,15 @@ def main():
     
     args = parser.parse_args()
     
-    # Get embedding dimension
     from config import EMBEDDING_MODELS
     embedding_dim = EMBEDDING_MODELS[args.embedding_model]['dim']
     
-    # Initialize attacker
     attacker = InverseEmbeddingAttacker(
         args.attacker, 
         args.embedding_model, 
         embedding_dim
     )
     
-    # Train attacker
     attacker.train(args.dataset, args.split)
     
     print("Training completed!")

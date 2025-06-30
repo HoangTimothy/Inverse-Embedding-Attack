@@ -16,7 +16,7 @@ from config import EMBEDDING_MODELS, ATTACKER_MODELS
 
 def demo_embedding_extraction():
     """Demo: Extract embeddings from different models"""
-    print("🔍 Demo: Embedding Extraction")
+    print("Demo: Embedding Extraction")
     print("="*50)
     
     # Sample sentences
@@ -29,7 +29,7 @@ def demo_embedding_extraction():
     
     # Test different embedding models
     for model_name, config in list(EMBEDDING_MODELS.items())[:2]:  # Test first 2 models
-        print(f"\n📊 Testing {model_name}:")
+        print(f"\nTesting {model_name}:")
         
         try:
             model = SentenceTransformer(config['path'])
@@ -43,11 +43,11 @@ def demo_embedding_extraction():
             print(f"  Similarity between 'I love this movie!' and 'This is terrible.': {similarity.item():.4f}")
             
         except Exception as e:
-            print(f"  ❌ Error: {e}")
+            print(f"  Error: {e}")
 
 def demo_alignment():
     """Demo: Alignment between different embedding spaces"""
-    print("\n🔄 Demo: Embedding Alignment")
+    print("\nDemo: Embedding Alignment")
     print("="*50)
     
     # Create sample embeddings with different dimensions
@@ -76,60 +76,60 @@ def demo_alignment():
 
 def demo_attack_simulation():
     """Demo: Simulate attack process"""
-    print("\n⚔️ Demo: Attack Simulation")
+    print("\nDemo: Attack Simulation")
     print("="*50)
     
     # Simulate the attack process
-    print("1. 📥 Input: Black-box embedding")
+    print("1. Input: Black-box embedding")
     print("   [0.3, -0.9, 0.7, 0.1, -0.5, ...]")
     
-    print("\n2. 🔄 Alignment (if needed)")
+    print("\n2. Alignment (if needed)")
     print("   [0.3, -0.9, 0.7, 0.1, -0.5, ...] -> [0.2, -0.8, 0.6, ...]")
     
-    print("\n3. 🎯 Attacker Model")
+    print("\n3. Attacker Model")
     print("   GPT-2/OPT/T5 generates text from embedding")
     
-    print("\n4. 📤 Output: Recovered text")
+    print("\n4. Output: Recovered text")
     print("   'I love this movie!'")
     
-    print("\n5. 📊 Evaluation")
+    print("\n5. Evaluation")
     print("   - Embedding similarity: 0.85")
     print("   - Exact match: False")
     print("   - BLEU score: 0.72")
 
 def demo_complete_flow():
     """Demo: Complete attack flow"""
-    print("\n🚀 Demo: Complete Attack Flow")
+    print("\nDemo: Complete Attack Flow")
     print("="*50)
     
     # Step 1: Prepare data
-    print("Step 1: 📊 Data Preparation")
+    print("Step 1: Data Preparation")
     print("  - Load SST-2 dataset")
     print("  - Create embeddings with 4 different models")
     print("  - Save embeddings to data/embeddings/")
     
     # Step 2: Train attackers
-    print("\nStep 2: 🎯 Train Attackers")
+    print("\nStep 2: Train Attackers")
     print("  - Train GPT-2 on all-mpnet-base-v2 embeddings")
     print("  - Train OPT on stsb-roberta-base embeddings") 
     print("  - Train T5 on all-MiniLM-L6-v2 embeddings")
     print("  - Save models to models/")
     
     # Step 3: Test on black-box
-    print("\nStep 3: 🔍 Test on Black-box")
+    print("\nStep 3: Test on Black-box")
     print("  - Load paraphrase-MiniLM-L6-v2 as black-box")
     print("  - Generate embeddings from test sentences")
     print("  - Use trained attackers to recover text")
     print("  - Evaluate performance")
     
     # Expected results
-    print("\n📈 Expected Results:")
+    print("\nExpected Results:")
     print("  - Embedding similarity: 0.7-0.9")
     print("  - Exact match rate: 0.1-0.3")
     print("  - BLEU score: 0.5-0.8")
 
 def main():
-    print("🎯 Inverse Embedding Attack Demo")
+    print("Inverse Embedding Attack Demo")
     print("="*60)
     print("This demo shows the key components of our solution:")
     print("- Embedding extraction from multiple models")
@@ -144,7 +144,7 @@ def main():
     demo_complete_flow()
     
     print("\n" + "="*60)
-    print("🎉 Demo completed!")
+    print("Demo completed!")
     print("\nTo run the full experiment:")
     print("python run_experiment.py --dataset sst2 --blackbox_model all-mpnet-base-v2")
     print("\nTo prepare data only:")

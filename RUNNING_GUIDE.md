@@ -1,84 +1,84 @@
 # Inverse Embedding Attack - Running Guide
 
-## 🚀 Thứ tự chạy project
+## Project Execution Order
 
-### **Bước 1: Chuẩn bị môi trường**
+### **Step 1: Environment Setup**
 ```bash
-# Cài đặt dependencies
+# Install dependencies
 pip install -r requirements.txt
 
-# Kiểm tra GPU (nếu có)
+# Check GPU (if available)
 python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
 ```
 
-### **Bước 2: Chuẩn bị datasets và embeddings**
+### **Step 2: Prepare Datasets and Embeddings**
 ```bash
-# Chuẩn bị tất cả datasets (SST-2, PersonaChat, ABCD)
-# Mỗi dataset sẽ có 10,000 samples
+# Prepare all datasets (SST-2, PersonaChat, ABCD)
+# Each dataset will have 10,000 samples
 python prepare_all_datasets.py
 ```
 
-**Kết quả:** Tạo ra 4 embedding datasets với 10,000 samples mỗi dataset:
+**Result:** Creates 4 embedding datasets with 10,000 samples each:
 - `sst2_train_all-mpnet-base-v2.json`
 - `personachat_train_stsb-roberta-base.json` 
 - `abcd_train_all-MiniLM-L6-v2.json`
 - `sst2_train_paraphrase-MiniLM-L6-v2.json`
 
-### **Bước 3: Train tất cả attackers**
+### **Step 3: Train All Attackers**
 ```bash
-# Train 3 attackers trên 3 datasets khác nhau
+# Train 3 attackers on 3 different datasets
 python train_all_attackers.py
 ```
 
-**Kết quả:** Train 3 attackers:
-- GPT-2 attacker trên SST-2 dataset
-- OPT attacker trên PersonaChat dataset  
-- T5 attacker trên ABCD dataset
+**Result:** Train 3 attackers:
+- GPT-2 attacker on SST-2 dataset
+- OPT attacker on PersonaChat dataset  
+- T5 attacker on ABCD dataset
 
-### **Bước 4: Kiểm tra models đã train**
+### **Step 4: Verify Trained Models**
 ```bash
-# Verify tất cả models đã được train thành công
+# Verify all models were trained successfully
 python train_all_attackers.py --verify-only
 ```
 
-### **Bước 5: Chạy evaluation**
+### **Step 5: Run Evaluation**
 ```bash
-# Test attackers trên black-box model
+# Test attackers on black-box model
 python src/evaluation/test_blackbox.py --dataset sst2 --split test --blackbox_model all-mpnet-base-v2
 ```
 
-### **Bước 6: Xem kết quả**
+### **Step 6: View Results**
 ```bash
-# Kiểm tra kết quả trong thư mục experiments/results/
+# Check results in experiments/results/ directory
 ls experiments/results/
 ```
 
 ---
 
-## 📋 Chi tiết từng bước
+## Step Details
 
-### **Bước 1: Chuẩn bị môi trường**
+### **Step 1: Environment Setup**
 
-**Mục đích:** Cài đặt tất cả dependencies cần thiết
+**Purpose:** Install all necessary dependencies
 
-**Kiểm tra:**
-- ✅ Python 3.8+
-- ✅ PyTorch với CUDA (nếu có GPU)
-- ✅ Transformers library
-- ✅ Sentence Transformers
-- ✅ Tất cả dependencies trong requirements.txt
+**Check:**
+- Python 3.8+
+- PyTorch with CUDA (if GPU available)
+- Transformers library
+- Sentence Transformers
+- All dependencies in requirements.txt
 
-### **Bước 2: Chuẩn bị datasets**
+### **Step 2: Dataset Preparation**
 
-**Mục đích:** Tạo 4 embedding datasets với 10,000 samples mỗi dataset
+**Purpose:** Create 4 embedding datasets with 10,000 samples each
 
-**Quá trình:**
-1. Load datasets từ HuggingFace (SST-2, PersonaChat, ABCD)
-2. Lấy 10,000 samples từ mỗi dataset
-3. Tạo embeddings bằng 4 embedding models khác nhau
-4. Lưu embeddings vào file JSON
+**Process:**
+1. Load datasets from HuggingFace (SST-2, PersonaChat, ABCD)
+2. Extract 10,000 samples from each dataset
+3. Create embeddings using 4 different embedding models
+4. Save embeddings to JSON files
 
-**Kết quả mong đợi:**
+**Expected Result:**
 ```
 data/embeddings/
 ├── sst2_train_all-mpnet-base-v2.json (10,000 samples)
@@ -87,22 +87,22 @@ data/embeddings/
 └── sst2_train_paraphrase-MiniLM-L6-v2.json (10,000 samples)
 ```
 
-### **Bước 3: Train attackers**
+### **Step 3: Train Attackers**
 
-**Mục đích:** Train 3 attacker models trên 3 datasets khác nhau
+**Purpose:** Train 3 attacker models on 3 different datasets
 
-**Cấu hình training:**
-- **GPT-2 attacker:** Train trên SST-2 dataset
-- **OPT attacker:** Train trên PersonaChat dataset
-- **T5 attacker:** Train trên ABCD dataset
+**Training Configuration:**
+- **GPT-2 attacker:** Train on SST-2 dataset
+- **OPT attacker:** Train on PersonaChat dataset
+- **T5 attacker:** Train on ABCD dataset
 
-**Tham số training:**
+**Training Parameters:**
 - Epochs: 5
 - Batch size: 8
 - Learning rate: 2e-5
-- Device: CUDA (nếu có) hoặc CPU
+- Device: CUDA (if available) or CPU
 
-**Kết quả mong đợi:**
+**Expected Result:**
 ```
 models/
 ├── attacker_gpt2_all-mpnet-base-v2/
@@ -110,37 +110,37 @@ models/
 └── attacker_t5_all-MiniLM-L6-v2/
 ```
 
-### **Bước 4: Verify models**
+### **Step 4: Verify Models**
 
-**Mục đích:** Kiểm tra tất cả models đã được train thành công
+**Purpose:** Check all models were trained successfully
 
-**Kiểm tra:**
-- ✅ Model files tồn tại
-- ✅ Projection layers được lưu
-- ✅ Tokenizers được lưu
-- ✅ Config files được lưu
+**Verification:**
+- Model files exist
+- Projection layers saved
+- Tokenizers saved
+- Config files saved
 
-### **Bước 5: Evaluation**
+### **Step 5: Evaluation**
 
-**Mục đích:** Test attackers trên black-box model
+**Purpose:** Test attackers on black-box model
 
-**Quá trình:**
+**Process:**
 1. Load trained attackers
 2. Load test dataset
-3. Generate text từ embeddings
-4. Tính similarity với original text
-5. Đánh giá chất lượng text
+3. Generate text from embeddings
+4. Calculate similarity with original text
+5. Evaluate text quality
 
 **Metrics:**
 - Embedding similarity (cosine similarity)
 - Text quality (length, diversity)
 - Semantic similarity
 
-### **Bước 6: Kết quả**
+### **Step 6: Results**
 
-**Mục đích:** Xem và phân tích kết quả
+**Purpose:** View and analyze results
 
-**Files kết quả:**
+**Result Files:**
 ```
 experiments/results/
 ├── blackbox_attack_results.json
@@ -150,92 +150,89 @@ experiments/results/
 
 ---
 
-## ⚠️ Lưu ý quan trọng
+## Important Notes
 
-### **Thời gian chạy:**
-- **Bước 2:** ~30-60 phút (tùy GPU)
-- **Bước 3:** ~2-4 giờ (tùy GPU và model size)
-- **Bước 5:** ~15-30 phút
+### **Execution Time:**
+- **Step 2:** ~30-60 minutes (depending on GPU)
+- **Step 3:** ~2-4 hours (depending on GPU and model size)
+- **Step 5:** ~15-30 minutes
 
-### **Yêu cầu phần cứng:**
-- **RAM:** Tối thiểu 16GB
-- **GPU:** Khuyến nghị có GPU (8GB+ VRAM)
-- **Storage:** Tối thiểu 10GB free space
+### **Hardware Requirements:**
+- **RAM:** Minimum 16GB
+- **GPU:** Recommended (8GB+ VRAM)
+- **Storage:** Minimum 10GB free space
 
-### **Xử lý lỗi:**
-- Nếu GPU out of memory: Giảm batch_size
-- Nếu training chậm: Tăng learning_rate
-- Nếu dataset loading lỗi: Kiểm tra internet connection
+### **Error Handling:**
+- If GPU out of memory: Reduce batch_size
+- If training slow: Increase learning_rate
+- If dataset loading fails: Check internet connection
 
 ---
 
-## 🔧 Troubleshooting
+## Troubleshooting
 
-### **Lỗi thường gặp:**
+### **Common Issues:**
 
 1. **CUDA out of memory:**
    ```bash
-   # Giảm batch size trong config.py
-   TRAIN_CONFIG['batch_size'] = 4  # Thay vì 8
+   # Reduce batch size in config.py
+   TRAIN_CONFIG['batch_size'] = 4  # Instead of 8
    ```
 
 2. **Dataset loading failed:**
    ```bash
-   # Kiểm tra internet connection
-   # Thử lại prepare_all_datasets.py
+   # Check internet connection
+   # Retry prepare_all_datasets.py
    ```
 
 3. **Model loading failed:**
    ```bash
-   # Kiểm tra model path
-   # Đảm bảo model đã được train thành công
+   # Check model path
+   # Ensure model was trained successfully
    ```
 
-### **Kiểm tra tiến trình:**
+### **Progress Monitoring:**
 ```bash
-# Xem logs
+# View logs
 tail -f logs/training.log
 
-# Kiểm tra GPU usage
+# Check GPU usage
 nvidia-smi
-
-# Kiểm tra disk space
-df -h
 ```
 
 ---
 
-## 📊 Expected Results
+## Expected Results
 
-### **Sau khi hoàn thành:**
+### **After Completion:**
 
-1. **4 embedding datasets** với 10,000 samples mỗi dataset
+1. **4 embedding datasets** with 10,000 samples each
 2. **3 trained attackers** (GPT-2, OPT, T5)
-3. **Black-box evaluation results** với similarity scores
-4. **Complete research pipeline** sẵn sàng cho publication
+3. **Black-box evaluation results** with similarity scores
+4. **Complete research pipeline** ready for publication
 
-### **Success metrics:**
-- ✅ Tất cả datasets được tạo thành công
-- ✅ Tất cả attackers được train thành công  
-- ✅ Similarity scores > 0.7 (tốt)
-- ✅ Text quality metrics đạt chuẩn
-
----
-
-## 🎯 Next Steps
-
-Sau khi hoàn thành pipeline:
-
-1. **Analyze results** - Phân tích kết quả chi tiết
-2. **Compare with baselines** - So sánh với baseline methods
-3. **Write paper** - Viết research paper
-4. **Submit to conference** - Submit đến conference/journal
+### **Success Metrics:**
+- ✅ All datasets created successfully
+- ✅ All attackers trained successfully  
+- ✅ Similarity scores > 0.7 (good)
+- ✅ Text quality metrics meet standard
 
 ---
 
-**🎉 Chúc bạn thành công với research project!**
+## Next Steps
 
-## 🎯 Test với Google Colab
+After completing pipeline:
+
+1. **Analyze results** - Analyze results in detail
+2. **Compare with baselines** - Compare with baseline methods
+3. **Write paper** - Write research paper
+4. **Submit to conference** - Submit to conference/journal
+
+---
+
+**🎉 Good luck with research project!**
+
+## Test with Google Colab
 
 ### 1. Clone repository
 ```python
@@ -259,7 +256,7 @@ Sau khi hoàn thành pipeline:
 !python run_experiment.py --dataset sst2 --blackbox_model all-mpnet-base-v2
 ```
 
-## 📊 Expected Results
+## Expected Results
 
 ### Demo Results:
 - Embedding extraction: ✅
@@ -272,7 +269,7 @@ Sau khi hoàn thành pipeline:
 - Exact match rate: 0.1-0.3
 - BLEU score: 0.5-0.8
 
-## 🔍 Debug Tips
+## Debug Tips
 
 ### 1. Check GPU availability
 ```python
@@ -295,7 +292,7 @@ dataset = load_dataset('glue', 'sst2', split='train[:10]')
 print(f"Loaded {len(dataset)} samples")
 ```
 
-## 📁 File Structure
+## File Structure
 ```
 Inverse_Embedding_Attack/
 ├── config.py                    # Configuration
@@ -318,12 +315,12 @@ Inverse_Embedding_Attack/
         └── alignment.py
 ```
 
-## 🆘 Need Help?
+## Need Help?
 
-Nếu gặp lỗi, hãy:
+If you encounter issues, please:
 
-1. Chạy `python quick_test.py` để kiểm tra components
-2. Chạy `python test_simple.py` để test chi tiết
-3. Kiểm tra logs và error messages
-4. Đảm bảo đã cài đúng dependencies
-5. Kiểm tra GPU/CPU compatibility 
+1. Run `python quick_test.py` to test components
+2. Run `python test_simple.py` to test in detail
+3. Check logs and error messages
+4. Ensure you have installed the correct dependencies
+5. Check GPU/CPU compatibility 

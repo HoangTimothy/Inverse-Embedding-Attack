@@ -1,35 +1,35 @@
 # Inverse Embedding Attack
 
-## Giải pháp tấn công ngược embedding thực tế
+## Realistic Inverse Embedding Attack Solution
 
-### Ý tưởng chính
-Thay vì train attacker trực tiếp trên black-box model (không thực tế), chúng ta:
-1. Train attackers trên các embedding models tương tự
-2. Sử dụng transfer learning để tấn công black-box model
-3. Không cần data gốc của black-box model
+### Main Idea
+Instead of training attackers directly on black-box models (unrealistic), we:
+1. Train attackers on similar embedding models
+2. Use transfer learning to attack black-box models
+3. No need for original black-box model data
 
-### Flow chính
+### Main Flow
 ```
 Dataset → Multiple Embedding Models → Train Attackers → Test on Black-box
 ```
 
-### Cấu trúc dự án
+### Project Structure
 ```
 Inverse_Embedding_Attack/
 ├── src/
-│   ├── data_processing/     # Xử lý dataset và tạo embeddings
-│   ├── attackers/          # Các model attacker
-│   ├── evaluation/         # Đánh giá kết quả
-│   └── utils/             # Utilities và helpers
-├── data/                  # Dataset và embeddings
+│   ├── data_processing/     # Dataset processing and embedding creation
+│   ├── attackers/          # Attacker models
+│   ├── evaluation/         # Result evaluation
+│   └── utils/             # Utilities and helpers
+├── data/                  # Datasets and embeddings
 ├── models/               # Trained models
-├── experiments/          # Configs và results
+├── experiments/          # Configs and results
 └── configs/             # Configuration files
 ```
 
-### Models được hỗ trợ
+### Supported Models
 - **Embedding Models**: all-mpnet-base-v2, stsb-roberta-base, all-MiniLM-L6-v2, paraphrase-MiniLM-L6-v2
-- **Attacker Models**: GPT-2, OPT, T5 (từ GEIA)
+- **Attacker Models**: GPT-2, OPT, T5 (from GEIA)
 - **Datasets**: SST-2, PersonaChat, ABCD
 
 ### Usage
