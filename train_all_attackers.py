@@ -148,15 +148,37 @@ def verify_trained_models():
     if config is None:
         return False
     
+    # Map embedding models to attacker models
+    attacker_model_mapping = {
+        'stsb-roberta-base': 'gpt2',
+        'all-MiniLM-L6-v2': 'opt', 
+        'paraphrase-MiniLM-L6-v2': 't5'
+    }
+    
     all_exist = True
     
-    for attacker_model in config['attackers'].keys():
-        model_path = os.path.join(PATHS['models_dir'], f"attacker_{attacker_model}")
+    for embedding_model in config['attackers'].keys():
+        attacker_type = attacker_model_mapping.get(embedding_model)
+        if attacker_type is None:
+            print(f"❌ {embedding_model}: Unknown attacker type")
+            all_exist = False
+            continue
         
-        if os.path.exists(model_path):
-            print(f"✅ {attacker_model}: {model_path}")
-        else:
-            print(f"❌ {attacker_model}: {model_path} - MISSING")
+        # Look for models with pattern: attacker_{attacker_type}_{embedding_model}_epoch_{epoch}
+        model_pattern = f"attacker_{attacker_type}_{embedding_model}_epoch_"
+        models_dir = PATHS['models_dir']
+        
+        # Check if any model with this pattern exists
+        model_found = False
+        if os.path.exists(models_dir):
+            for item in os.listdir(models_dir):
+                if item.startswith(model_pattern):
+                    print(f"✅ {embedding_model}: {os.path.join(models_dir, item)}")
+                    model_found = True
+                    break
+        
+        if not model_found:
+            print(f"❌ {embedding_model}: No model found with pattern '{model_pattern}*'")
             all_exist = False
     
     if all_exist:
